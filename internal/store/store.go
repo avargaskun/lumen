@@ -46,10 +46,14 @@ func New(dsn string, dimensions int) (*Store, error) {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
-	// Enable WAL mode and foreign keys.
+	// Enable WAL mode, foreign keys, and write-performance settings.
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA cache_size=-64000",
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA busy_timeout=5000",
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -84,6 +88,8 @@ func createSchema(db *sql.DB, dimensions int) error {
 			start_line INTEGER NOT NULL,
 			end_line   INTEGER NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunks_kind ON chunks(kind)`,
 		fmt.Sprintf(
 			`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
 				id TEXT PRIMARY KEY,
@@ -221,10 +227,7 @@ func (s *Store) Search(queryVec []float32, limit int, kindFilter string) ([]Sear
 	// table cannot filter by kind itself.
 	k := limit
 	if kindFilter != "" {
-		k = limit * 3
-		if k < 10 {
-			k = 10
-		}
+		k = max(limit*3, 10)
 	}
 
 	query := `

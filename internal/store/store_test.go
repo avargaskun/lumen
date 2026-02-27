@@ -193,3 +193,40 @@ func TestStore_Stats(t *testing.T) {
 		t.Fatalf("expected 2 chunks, got %d", stats.TotalChunks)
 	}
 }
+
+func TestStore_Pragmas(t *testing.T) {
+	s, err := New(":memory:", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var mode string
+	if err := s.db.QueryRow("PRAGMA synchronous").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	// 1 = NORMAL
+	if mode != "1" {
+		t.Fatalf("expected synchronous=NORMAL(1), got %s", mode)
+	}
+}
+
+func TestStore_ChunkIndexesExist(t *testing.T) {
+	s, err := New(":memory:", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	var count int
+	err = s.db.QueryRow(
+		`SELECT count(*) FROM sqlite_master
+		 WHERE type='index' AND name IN ('idx_chunks_file_path','idx_chunks_kind')`,
+	).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 indexes, got %d", count)
+	}
+}
