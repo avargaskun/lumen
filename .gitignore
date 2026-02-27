@@ -1,0 +1,11 @@
+# Binary
+agent-index
+agent-index-go
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
