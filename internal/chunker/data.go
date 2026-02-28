@@ -110,10 +110,7 @@ func (c *DataChunker) chunkJSON(filePath string, content []byte) ([]Chunk, error
 			}
 		}
 		rawStr := strings.TrimSpace(string(raw))
-		endLine := startLine + strings.Count(rawStr, "\n")
-		if endLine > len(srcLines) {
-			endLine = len(srcLines)
-		}
+		endLine := min(startLine+strings.Count(rawStr, "\n"), len(srcLines))
 		body := searchKey + ": " + rawStr
 		chunks = append(chunks, makeChunk(filePath, key, "key", startLine, endLine, body))
 	}
