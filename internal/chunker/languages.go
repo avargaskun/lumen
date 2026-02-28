@@ -39,6 +39,7 @@ var supportedExtensions = []string{
 	".c", ".h",
 	".cpp", ".cc", ".cxx", ".hpp",
 	".php",
+	".md", ".mdx",
 }
 
 // SupportedExtensions returns the file extensions indexed by DefaultLanguages.
@@ -154,6 +155,8 @@ func DefaultLanguages() map[string]Chunker {
 
 	goChunker := NewGoAST()
 
+	md := NewMarkdownChunker()
+
 	return map[string]Chunker{
 		".go":   goChunker,
 		".ts":   ts,
@@ -172,5 +175,7 @@ func DefaultLanguages() map[string]Chunker {
 		".cxx":  cpp,
 		".hpp":  cpp,
 		".php":  php,
+		".md":   md,
+		".mdx":  md,
 	}
 }

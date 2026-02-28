@@ -544,6 +544,8 @@ func TestDefaultLanguages_AllExtensionsPresent(t *testing.T) {
 		".cxx":  []byte("void foo() {}"),
 		".hpp":  []byte("void foo() {}"),
 		".php":  []byte("<?php\nfunction foo() {}"),
+		".md":   []byte("# Foo\nSome content."),
+		".mdx":  []byte("# Foo\nSome content."),
 	}
 
 	langs := chunker.DefaultLanguages()
