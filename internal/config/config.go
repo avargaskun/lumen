@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/aeneasr/agent-index/internal/embedder"
+	"github.com/aeneasr/lumen/internal/embedder"
 )
 
 const (

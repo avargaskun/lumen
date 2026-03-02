@@ -1,4 +1,4 @@
-module github.com/aeneasr/agent-index
+module github.com/aeneasr/lumen
 
 go 1.25
 

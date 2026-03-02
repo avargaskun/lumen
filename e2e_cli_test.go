@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aeneasr/agent-index/internal/config"
+	"github.com/aeneasr/lumen/internal/config"
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 )

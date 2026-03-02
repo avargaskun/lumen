@@ -22,7 +22,7 @@ import (
 	sitter_rs "github.com/smacker/go-tree-sitter/rust"
 	sitter_ts "github.com/smacker/go-tree-sitter/typescript/typescript"
 
-	"github.com/aeneasr/agent-index/internal/chunker"
+	"github.com/aeneasr/lumen/internal/chunker"
 )
 
 var samplePython = []byte(`def greet(name):

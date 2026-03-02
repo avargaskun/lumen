@@ -19,7 +19,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/aeneasr/agent-index/internal/config"
+	"github.com/aeneasr/lumen/internal/config"
 )
 
 // stubEmbedder satisfies embedder.Embedder for tests.

@@ -17,8 +17,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/aeneasr/agent-index/internal/config"
-	"github.com/aeneasr/agent-index/internal/embedder"
+	"github.com/aeneasr/lumen/internal/config"
+	"github.com/aeneasr/lumen/internal/embedder"
 )
 
 // newEmbedder creates an Embedder based on the configured backend.
