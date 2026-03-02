@@ -15,6 +15,6 @@
 // Package main is the agent-index entry point.
 package main
 
-import "github.com/aeneasr/agent-index/cmd"
+import "github.com/aeneasr/lumen/cmd"
 
 func main() { cmd.Execute() }

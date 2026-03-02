@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/aeneasr/agent-index/internal/chunker"
+	"github.com/aeneasr/lumen/internal/chunker"
 )
 
 // splitOversizedChunks splits chunks whose estimated token count exceeds

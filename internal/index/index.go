@@ -24,10 +24,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/aeneasr/agent-index/internal/chunker"
-	"github.com/aeneasr/agent-index/internal/embedder"
-	"github.com/aeneasr/agent-index/internal/merkle"
-	"github.com/aeneasr/agent-index/internal/store"
+	"github.com/aeneasr/lumen/internal/chunker"
+	"github.com/aeneasr/lumen/internal/embedder"
+	"github.com/aeneasr/lumen/internal/merkle"
+	"github.com/aeneasr/lumen/internal/store"
 )
 
 // ProgressFunc is an optional callback for reporting indexing progress.

@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aeneasr/agent-index/internal/config"
+	"github.com/aeneasr/lumen/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

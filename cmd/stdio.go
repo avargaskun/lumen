@@ -23,10 +23,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/aeneasr/agent-index/internal/config"
-	"github.com/aeneasr/agent-index/internal/embedder"
-	"github.com/aeneasr/agent-index/internal/index"
-	"github.com/aeneasr/agent-index/internal/store"
+	"github.com/aeneasr/lumen/internal/config"
+	"github.com/aeneasr/lumen/internal/embedder"
+	"github.com/aeneasr/lumen/internal/index"
+	"github.com/aeneasr/lumen/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 )
