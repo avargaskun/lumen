@@ -1,6 +1,6 @@
 # Lumen — semantic search for code agents
 
-[![CI](https://github.com/aeneasr/agent-index/actions/workflows/ci.yml/badge.svg)](https://github.com/aeneasr/agent-index/actions/workflows/ci.yml)
+[![CI](https://github.com/aeneasr/lumen/actions/workflows/ci.yml/badge.svg)](https://github.com/aeneasr/lumen/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/aeneasr/lumen)](https://goreportcard.com/report/github.com/aeneasr/lumen)
 [![Go Reference](https://pkg.go.dev/badge/github.com/aeneasr/lumen.svg)](https://pkg.go.dev/github.com/aeneasr/lumen)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
