@@ -64,8 +64,8 @@ type IgnoreTree struct {
 	rootDir string
 	extSet  map[string]bool
 
-	mu    sync.Mutex
-	dirs  map[string]*dirIgnore // keyed by relative dir path ("" = root)
+	mu   sync.Mutex
+	dirs map[string]*dirIgnore // keyed by relative dir path ("" = root)
 }
 
 // NewIgnoreTree creates an IgnoreTree rooted at rootDir that filters by the

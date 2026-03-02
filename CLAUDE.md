@@ -131,9 +131,8 @@ Five layers, applied in order during tree walks:
    IDE dirs, etc.). Cheapest check (map lookup).
 2. **`.gitignore`** — root + nested, hierarchical matching via
    `sabhiram/go-gitignore`. Supports `*` globs, `**`, directory patterns
-   (`build/`), negation (`!important.gen.go`), and comments. Nested
-   `.gitignore` files in subdirectories are discovered lazily during the walk
-   and cached.
+   (`build/`), negation (`!important.gen.go`), and comments. Nested `.gitignore`
+   files in subdirectories are discovered lazily during the walk and cached.
 3. **`.agentindexignore`** — same syntax as `.gitignore`, root + nested. Allows
    excluding files from indexing without modifying `.gitignore`. Loaded at every
    directory level alongside `.gitignore`.
@@ -145,9 +144,9 @@ Five layers, applied in order during tree walks:
 
 `MakeSkip(rootDir, exts)` creates an `IgnoreTree` that lazily discovers and
 caches ignore rules as `filepath.WalkDir` traverses directories. The `SkipFunc`
-signature is unchanged — callers need zero modifications. For path `a/b/c/foo.go`,
-matchers are checked at each ancestor level (`""`, `"a"`, `"a/b"`, `"a/b/c"`),
-each receiving the path relative to its directory.
+signature is unchanged — callers need zero modifications. For path
+`a/b/c/foo.go`, matchers are checked at each ancestor level (`""`, `"a"`,
+`"a/b"`, `"a/b/c"`), each receiving the path relative to its directory.
 
 ### Incremental indexing
 

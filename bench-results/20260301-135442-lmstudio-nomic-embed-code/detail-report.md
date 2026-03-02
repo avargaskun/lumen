@@ -690,6 +690,7 @@ negative, and zero buckets, then verifying they match `h.Count`.
 4. **Validation** — `Validate()` (`histogram.go:426-479`) calls
    `checkHistogramBuckets` for both positive and negative sides to sum all
    bucket observations into `nCount` and `pCount`, then checks:
+
    ```go
    sumOfBuckets := nCount + pCount + h.ZeroCount  // line 467
    ```

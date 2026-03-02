@@ -261,10 +261,10 @@ func TestParseLinguistGenerated(t *testing.T) {
 	dir := t.TempDir()
 
 	tests := []struct {
-		name     string
-		content  string
-		match    []string // paths that should match
-		noMatch  []string // paths that should not match
+		name    string
+		content string
+		match   []string // paths that should match
+		noMatch []string // paths that should not match
 	}{
 		{
 			name:    "bare linguist-generated",
@@ -412,9 +412,9 @@ func TestBuildTree_WithNestedGitignore(t *testing.T) {
 	// main.go, sub/sub.go, sub/helper.go should be present
 	// app.log (root .gitignore), sub/internal_helper.go (nested .gitignore) excluded
 	expected := map[string]bool{
-		"main.go":        true,
-		"sub/sub.go":     true,
-		"sub/helper.go":  true,
+		"main.go":       true,
+		"sub/sub.go":    true,
+		"sub/helper.go": true,
 	}
 	if len(tree.Files) != len(expected) {
 		t.Fatalf("expected %d files, got %d: %v", len(expected), len(tree.Files), tree.Files)
