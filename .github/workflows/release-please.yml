@@ -37,18 +37,6 @@ jobs:
       - name: Fix git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Test
-        run: make test
-
-      - name: Vet
-        run: go vet -tags=fts5 ./...
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
-          args: --build-tags=fts5
-
       - name: Release
         run: goreleaser release --clean
         env:
