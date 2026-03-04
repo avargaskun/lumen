@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aeneasr/lumen/internal/chunker"
-	"github.com/aeneasr/lumen/internal/embedder"
-	"github.com/aeneasr/lumen/internal/merkle"
-	"github.com/aeneasr/lumen/internal/store"
+	"github.com/ory/lumen/internal/chunker"
+	"github.com/ory/lumen/internal/embedder"
+	"github.com/ory/lumen/internal/merkle"
+	"github.com/ory/lumen/internal/store"
 )
 
 // ProgressFunc is an optional callback for reporting indexing progress.

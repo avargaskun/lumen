@@ -31,8 +31,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aeneasr/lumen/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/ory/lumen/internal/config"
 )
 
 // Local copies of tool I/O types for black-box E2E testing.
