@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aeneasr/lumen/internal/config"
-	"github.com/aeneasr/lumen/internal/embedder"
-	"github.com/aeneasr/lumen/internal/index"
+	"github.com/ory/lumen/internal/config"
+	"github.com/ory/lumen/internal/embedder"
+	"github.com/ory/lumen/internal/index"
 	"github.com/spf13/cobra"
 )
 

@@ -19,7 +19,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/aeneasr/lumen/internal/config"
+	"github.com/ory/lumen/internal/config"
 	"github.com/spf13/cobra"
 )
 

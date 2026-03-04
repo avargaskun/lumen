@@ -15,6 +15,6 @@
 // Package main is the lumen entry point.
 package main
 
-import "github.com/aeneasr/lumen/cmd"
+import "github.com/ory/lumen/cmd"
 
 func main() { cmd.Execute() }

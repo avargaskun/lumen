@@ -1,4 +1,4 @@
-module github.com/aeneasr/lumen
+module github.com/ory/lumen
 
 go 1.25
 
