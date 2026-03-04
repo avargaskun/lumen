@@ -17,8 +17,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/aeneasr/lumen/internal/config"
-	"github.com/aeneasr/lumen/internal/embedder"
+	"github.com/ory/lumen/internal/config"
+	"github.com/ory/lumen/internal/embedder"
 )
 
 // newEmbedder creates an Embedder based on the configured backend.

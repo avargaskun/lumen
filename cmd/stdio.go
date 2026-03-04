@@ -27,11 +27,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aeneasr/lumen/internal/config"
-	"github.com/aeneasr/lumen/internal/embedder"
-	"github.com/aeneasr/lumen/internal/index"
-	"github.com/aeneasr/lumen/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/ory/lumen/internal/config"
+	"github.com/ory/lumen/internal/embedder"
+	"github.com/ory/lumen/internal/index"
+	"github.com/ory/lumen/internal/store"
 	"github.com/spf13/cobra"
 )
 
