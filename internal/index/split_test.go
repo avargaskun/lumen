@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aeneasr/lumen/internal/chunker"
+	"github.com/ory/lumen/internal/chunker"
 )
 
 func makeTestChunk(symbol string, startLine, endLine int, content string) chunker.Chunk {

@@ -26,9 +26,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aeneasr/lumen/internal/config"
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/ory/lumen/internal/config"
 )
 
 // runCLI runs the lumen binary with the given args and returns stdout, stderr, and any error.

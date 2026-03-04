@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aeneasr/lumen/internal/chunker"
+	"github.com/ory/lumen/internal/chunker"
 )
 
 func TestNewStore_CreatesSchema(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3" // register sqlite3 driver
 
-	"github.com/aeneasr/lumen/internal/chunker"
+	"github.com/ory/lumen/internal/chunker"
 )
 
 func init() {
@@ -332,7 +332,9 @@ func (s *Store) insertChunksInTransaction(chunks []chunker.Chunk, vectors [][]fl
 	return tx.Commit()
 }
 
-func insertChunkAndVector(chunkStmt, vecStmt interface{ Exec(...interface{}) (sql.Result, error) }, c chunker.Chunk, vec []float32, idx int) error {
+func insertChunkAndVector(chunkStmt, vecStmt interface {
+	Exec(...interface{}) (sql.Result, error)
+}, c chunker.Chunk, vec []float32, idx int) error {
 	if _, err := chunkStmt.Exec(c.ID, c.FilePath, c.Symbol, c.Kind, c.StartLine, c.EndLine); err != nil {
 		return fmt.Errorf("insert chunk %s: %w", c.ID, err)
 	}
