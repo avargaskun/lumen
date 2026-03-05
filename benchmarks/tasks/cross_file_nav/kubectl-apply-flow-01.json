@@ -1,0 +1,25 @@
+{
+  "id": "kubectl-nav-apply-flow-01",
+  "category": "cross_file_nav",
+  "repo": "https://github.com/kubernetes/kubectl",
+  "commit": "v0.29.0",
+  "language": "go",
+  "prompt": "Trace the execution flow of `kubectl apply -f manifest.yaml` from the CLI entry point to the actual API server call. List every significant function in the chain, including:\n1. Where the 'apply' command is registered\n2. Where the apply options are validated\n3. Where the manifest file is read and parsed\n4. Where server-side apply vs client-side apply is decided\n5. Where the actual HTTP request to the API server is made\n\nFor each, give the file path, function name, and a one-line description.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "locations",
+    "expected_locations": [
+      {"file": "pkg/cmd/apply/apply.go", "symbol": "NewCmdApply"},
+      {"file": "pkg/cmd/apply/apply.go", "symbol": "ApplyOptions.Run"},
+      {"file": "pkg/cmd/apply/apply.go", "symbol": "ApplyOptions.applyOneObject"}
+    ]
+  },
+  "expected_files_touched": [],
+  "metadata": {
+    "difficulty": "hard",
+    "num_relevant_files": 8,
+    "repo_size_files": 1500,
+    "source": "manual",
+    "description": "Deep call-chain tracing in a medium Go codebase. Tests whether semantic search helps follow execution flow across package boundaries."
+  }
+}

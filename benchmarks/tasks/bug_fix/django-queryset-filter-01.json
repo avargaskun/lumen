@@ -1,0 +1,22 @@
+{
+  "id": "django-bugfix-queryset-filter-01",
+  "category": "bug_fix",
+  "repo": "https://github.com/django/django",
+  "commit": "0fbdb9784da915fce5dcc1fe82bac9b4785749e5",
+  "language": "python",
+  "prompt": "The following bug has been reported:\n\nQuerySet.defer() doesn't clear deferred field when chaining with only().\n\nExample:\n  qs = MyModel.objects.only('name').defer('name')\n  # Expected: all fields loaded (defer cancels only)\n  # Actual: only 'name' is loaded, defer is silently ignored\n\nThe issue is in the query construction logic. Find the bug and fix it so that .defer() properly interacts with .only() when chained. Do not modify any test files.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "test_pass",
+    "test_cmd": "python -m pytest tests/defer/tests.py -x -q",
+    "expected_exit_code": 0
+  },
+  "expected_files_touched": ["django/db/models/sql/query.py"],
+  "metadata": {
+    "difficulty": "medium",
+    "num_relevant_files": 3,
+    "repo_size_files": 4500,
+    "source": "swe-bench-lite-adapted",
+    "description": "Tests whether semantic search helps locate query construction logic in Django's large ORM codebase faster than grep."
+  }
+}

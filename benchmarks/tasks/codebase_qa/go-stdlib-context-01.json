@@ -1,0 +1,28 @@
+{
+  "id": "go-qa-context-propagation-01",
+  "category": "codebase_qa",
+  "repo": "https://github.com/golang/go",
+  "commit": "go1.22.0",
+  "language": "go",
+  "prompt": "Explain how context cancellation propagates through the Go standard library's context package. Specifically:\n\n1. How does context.WithCancel create a cancellable context?\n2. What is the internal data structure that tracks parent-child relationships?\n3. How does cancelling a parent propagate to all descendants?\n4. What is the role of the propagateCancel function?\n5. How does context.WithTimeout differ from WithDeadline internally?\n\nBase your answer entirely on the source code, citing specific files and line numbers.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "llm_judge",
+    "rubric": [
+      {"fact": "WithCancel creates a cancelCtx struct that embeds the parent context", "weight": 1.0},
+      {"fact": "cancelCtx has a children map tracking child contexts", "weight": 1.0},
+      {"fact": "propagateCancel walks up to find a *cancelCtx ancestor and registers the child", "weight": 1.5},
+      {"fact": "cancel() iterates over children and calls each child's cancel()", "weight": 1.0},
+      {"fact": "WithTimeout is a thin wrapper around WithDeadline", "weight": 0.5},
+      {"fact": "References specific file paths in src/context/", "weight": 1.0}
+    ]
+  },
+  "expected_files_touched": [],
+  "metadata": {
+    "difficulty": "medium",
+    "num_relevant_files": 2,
+    "repo_size_files": 9000,
+    "source": "manual",
+    "description": "Q&A in a massive codebase. The relevant code is in 1-2 files, but finding it in 9000 files tests whether semantic search shortcuts the exploration."
+  }
+}

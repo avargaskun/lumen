@@ -1,0 +1,22 @@
+{
+  "id": "flask-feat-rate-limiter-01",
+  "category": "feature_add",
+  "repo": "https://github.com/pallets/flask",
+  "commit": "3.0.0",
+  "language": "python",
+  "prompt": "Add a simple in-memory rate limiter decorator to Flask. Requirements:\n\n1. Create a new module `flask/ratelimit.py` with a `rate_limit(max_requests, window_seconds)` decorator\n2. The decorator should use the client IP from `request.remote_addr` as the key\n3. When rate limited, return a 429 response with a JSON body: {\"error\": \"rate limit exceeded\", \"retry_after\": <seconds>}\n4. Store state in a module-level dict (in-memory, no external deps)\n5. Follow existing Flask coding patterns for decorators (look at how `login_required` or similar decorators work in the codebase)\n\nDo NOT modify existing files except to add an import in `flask/__init__.py`.",
+  "setup_commands": ["pip install -e ."],
+  "evaluation": {
+    "type": "compile_and_test",
+    "test_cmd": "python -c \"from flask.ratelimit import rate_limit; print('import ok')\" && python -m pytest tests/ -x -q --timeout=30",
+    "expected_exit_code": 0
+  },
+  "expected_files_touched": ["src/flask/ratelimit.py", "src/flask/__init__.py"],
+  "metadata": {
+    "difficulty": "medium",
+    "num_relevant_files": 3,
+    "repo_size_files": 300,
+    "source": "manual",
+    "description": "Small repo feature addition. Tests whether semantic search helps discover Flask's decorator patterns faster, even in a small codebase."
+  }
+}

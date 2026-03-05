@@ -1,0 +1,27 @@
+{
+  "id": "go-bugfix-nethttp-01",
+  "category": "bug_fix",
+  "repo": "https://github.com/golang/go",
+  "commit": "go1.22.0",
+  "language": "go",
+  "prompt": "There is a subtle issue with net/http.Server.Shutdown: when called concurrently with active WebSocket upgrade connections, the server can hang indefinitely because hijacked connections are not tracked by the server's internal connection counter.\n\nFind where the server tracks active connections and how Shutdown waits for them. Explain the mechanism and identify whether hijacked connections are properly handled. Write a summary of your findings as a comment in a new file called ANALYSIS.md in the repo root.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "llm_judge",
+    "rubric": [
+      {"fact": "Server uses a sync.WaitGroup or activeConn counter to track connections", "weight": 1.0},
+      {"fact": "Hijacked connections call server.setState with StateHijacked", "weight": 1.0},
+      {"fact": "StateHijacked connections are removed from the active set", "weight": 1.0},
+      {"fact": "Shutdown calls closeIdleConns and then waits for active connections", "weight": 1.0},
+      {"fact": "The analysis identifies that hijacked connections are properly decremented from tracking", "weight": 0.5}
+    ]
+  },
+  "expected_files_touched": ["ANALYSIS.md"],
+  "metadata": {
+    "difficulty": "hard",
+    "num_relevant_files": 5,
+    "repo_size_files": 9000,
+    "source": "manual",
+    "description": "Large Go stdlib codebase. Tests whether semantic search helps navigate deeply nested internal HTTP server implementation."
+  }
+}

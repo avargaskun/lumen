@@ -1,0 +1,26 @@
+{
+  "id": "django-nav-middleware-chain-01",
+  "category": "cross_file_nav",
+  "repo": "https://github.com/django/django",
+  "commit": "0fbdb9784da915fce5dcc1fe82bac9b4785749e5",
+  "language": "python",
+  "prompt": "I need to understand Django's middleware execution chain. Find and list:\n1. Where middleware classes are loaded from settings\n2. Where the middleware chain is constructed (the handler that wraps them)\n3. Where process_request / process_response / process_exception hooks are called\n4. Where the __call__ method of the base middleware handler lives\n\nFor each, provide the exact file path and the function/class name. Output your answer as a structured list.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "locations",
+    "expected_locations": [
+      {"file": "django/core/handlers/base.py", "symbol": "BaseHandler.load_middleware"},
+      {"file": "django/core/handlers/base.py", "symbol": "BaseHandler._get_response"},
+      {"file": "django/utils/deprecation.py", "symbol": "MiddlewareMixin.__call__"},
+      {"file": "django/core/handlers/exception.py", "symbol": "convert_exception_to_response"}
+    ]
+  },
+  "expected_files_touched": [],
+  "metadata": {
+    "difficulty": "medium",
+    "num_relevant_files": 4,
+    "repo_size_files": 4500,
+    "source": "manual",
+    "description": "Cross-file navigation in Django. Agent must trace middleware from settings loading to request processing. Semantic search should find these via concept rather than exact string."
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lumen Benchmark Task",
+  "type": "object",
+  "required": ["id", "category", "repo", "commit", "language", "prompt", "evaluation", "metadata"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique task identifier: {repo-short}-{category-short}-{seq}"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["bug_fix", "cross_file_nav", "feature_add", "codebase_qa", "refactor"]
+    },
+    "repo": {
+      "type": "string",
+      "description": "Git clone URL"
+    },
+    "commit": {
+      "type": "string",
+      "description": "Pinned commit SHA to checkout"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["go", "python", "rust", "typescript", "java", "multi"]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The exact prompt sent to Claude Code"
+    },
+    "setup_commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Commands to run after checkout (e.g., install deps)"
+    },
+    "evaluation": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["test_pass", "diff_match", "locations", "llm_judge", "compile_and_test"]
+        },
+        "test_cmd": {
+          "type": "string",
+          "description": "Command to run for test_pass evaluation"
+        },
+        "expected_exit_code": {
+          "type": "integer",
+          "default": 0
+        },
+        "expected_diff_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Files that should be modified (for diff_match)"
+        },
+        "expected_locations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": { "type": "string" },
+              "symbol": { "type": "string" },
+              "line_range": {
+                "type": "array",
+                "items": { "type": "integer" },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "required": ["file"]
+          },
+          "description": "Expected file:line locations for cross_file_nav"
+        },
+        "rubric": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "fact": { "type": "string" },
+              "weight": { "type": "number", "default": 1.0 }
+            },
+            "required": ["fact"]
+          },
+          "description": "Required facts for llm_judge evaluation"
+        },
+        "grep_absent": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Patterns that must NOT appear in the codebase after task (for refactor)"
+        }
+      }
+    },
+    "expected_files_touched": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Files the correct solution should modify"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "difficulty": {
+          "type": "string",
+          "enum": ["easy", "medium", "hard"]
+        },
+        "num_relevant_files": {
+          "type": "integer",
+          "description": "Number of files the agent needs to find"
+        },
+        "repo_size_files": {
+          "type": "integer",
+          "description": "Approximate number of files in the repo"
+        },
+        "source": {
+          "type": "string",
+          "description": "Where this task came from (swe-bench-lite, manual, etc.)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what the task tests"
+        }
+      }
+    }
+  }
+}

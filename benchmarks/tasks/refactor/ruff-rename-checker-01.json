@@ -1,0 +1,23 @@
+{
+  "id": "ruff-refactor-rename-checker-01",
+  "category": "refactor",
+  "repo": "https://github.com/astral-sh/ruff",
+  "commit": "v0.3.0",
+  "language": "rust",
+  "prompt": "In the Ruff codebase, the pyflakes checker module uses a struct called `Checker`. Find ALL files that import or reference `pyflakes::Checker` and list them. Then rename the struct from `Checker` to `PyflakesChecker` in all locations where it is defined and referenced, ensuring the code still compiles.\n\nDo not rename any other `Checker` structs from other linter modules.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "compile_and_test",
+    "test_cmd": "cargo check 2>&1 | tail -5",
+    "expected_exit_code": 0,
+    "grep_absent": ["pyflakes::Checker[^a-zA-Z]"]
+  },
+  "expected_files_touched": [],
+  "metadata": {
+    "difficulty": "hard",
+    "num_relevant_files": 15,
+    "repo_size_files": 3000,
+    "source": "manual",
+    "description": "Large Rust codebase with many similarly-named structs. Tests whether semantic search helps disambiguate specific Checker from the many Checker types."
+  }
+}

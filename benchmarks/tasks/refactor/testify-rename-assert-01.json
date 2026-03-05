@@ -1,0 +1,23 @@
+{
+  "id": "testify-refactor-rename-01",
+  "category": "refactor",
+  "repo": "https://github.com/stretchr/testify",
+  "commit": "v1.9.0",
+  "language": "go",
+  "prompt": "Rename the function `ObjectsAreEqual` to `DeepEqual` throughout the entire testify codebase. This includes:\n1. The function definition\n2. All call sites\n3. All references in comments and documentation\n4. Any test cases that reference it by name\n\nMake sure the code compiles after the rename. Do not change any behavior.",
+  "setup_commands": [],
+  "evaluation": {
+    "type": "compile_and_test",
+    "test_cmd": "go build ./... && go test ./... -count=1 -timeout=120s",
+    "expected_exit_code": 0,
+    "grep_absent": ["ObjectsAreEqual"]
+  },
+  "expected_files_touched": ["assert/assertions.go", "assert/assertions_test.go"],
+  "metadata": {
+    "difficulty": "easy",
+    "num_relevant_files": 5,
+    "repo_size_files": 100,
+    "source": "manual",
+    "description": "Tiny repo refactoring. Lumen should provide no meaningful advantage here — serves as null hypothesis control."
+  }
+}
