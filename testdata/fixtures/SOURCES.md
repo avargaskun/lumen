@@ -22,6 +22,7 @@ E2E test fixtures. They are used solely for testing purposes.
 ## JavaScript
 
 - **expressjs/express** (MIT) — https://github.com/expressjs/express
+- **pillarjs/router** (MIT) — https://github.com/pillarjs/router
 - **fastify/fastify** (MIT) — https://github.com/fastify/fastify
 - **nodejs/node** (MIT) — https://github.com/nodejs/node
 

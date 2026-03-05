@@ -207,6 +207,13 @@ extract_winner() {
   grep -oE '\*\*Winner: [^*]+' "$brief_file" 2>/dev/null | sed 's/\*\*Winner: //' | tr -d ' \n' || echo "unknown"
 }
 
+# ── Extract runner-up from judge brief file ────────────────────────────────────
+extract_runner_up() {
+  local brief_file="$1"
+  grep -oE '\*\*Runner-up: [^*]+' "$brief_file" 2>/dev/null \
+    | sed 's/\*\*Runner-up: //' | tr -d ' \n' || echo "---"
+}
+
 # ── Run LLM judge for one question ────────────────────────────────────────────
 run_judge() {
   local q_idx="$1"
@@ -250,6 +257,23 @@ $(cat "$af")
     return
   fi
 
+  # Build fixture and ground truth context
+  local fixture_dir="${Q_FIXTURES[$q_idx]}"
+  local fixture_listing=""
+  if [[ -d "$fixture_dir" ]]; then
+    fixture_listing="## Available Source Files
+$(ls -1 "$fixture_dir")
+"
+  fi
+
+  local ground_truth=""
+  local gt_file="$REPO/testdata/ground-truth/${slug}.md"
+  if [[ -f "$gt_file" ]]; then
+    ground_truth="## Ground Truth
+$(cat "$gt_file")
+"
+  fi
+
   printf "  Judging %-28s ... " "$slug"
 
   # Brief verdict for summary (content quality + efficiency)
@@ -263,18 +287,25 @@ $all_answers
 Metrics:
 $metrics_table
 
+$fixture_listing
+$ground_truth
+
 Evaluate in three sections:
 
 ## Content Quality
-Rank the answers [model/scenario] from best to worst. One sentence per answer covering correctness, completeness, and use of specific file/line references.
+Rank the answers [model/scenario] from best to worst. One sentence per answer covering correctness, completeness, and use of specific file/line references. Verify claims against the ground truth and source file listing — flag any fabricated code or incorrect type/signature claims.
 
 ## Efficiency
 One or two sentences comparing runtime, token usage, and cost across scenarios. Note which scenario offers the best quality-to-cost tradeoff.
 
 ## Verdict
-On the very last line write exactly: **Winner: model/scenario**
-Choose the single run that offers the best combination of answer quality, token usage, cost, and runtime. All three efficiency dimensions (tokens, cost, time) matter equally alongside quality.
-Example: **Winner: sonnet/solo**" \
+On the very last two lines write exactly:
+**Winner: model/scenario**
+**Runner-up: model/scenario**
+Choose based on answer quality first, then token usage, cost, and runtime. All three efficiency dimensions (tokens, cost, time) matter equally alongside quality.
+Example:
+**Winner: sonnet/solo**
+**Runner-up: sonnet/together**" \
     > "$judge_brief_file" 2>&1 || echo "_Judge unavailable_" > "$judge_brief_file"
 
   # Detailed analysis for detail report
@@ -288,10 +319,13 @@ $all_answers
 Metrics:
 $metrics_table
 
+$fixture_listing
+$ground_truth
+
 Evaluate in two sections:
 
 ## Content Quality
-Rank the answers from best to worst. For each, write a paragraph covering: (1) correctness, (2) completeness, (3) precision of file/line references, (4) whether it used the right tools/approach to find information.
+Rank the answers from best to worst. For each, write a paragraph covering: (1) correctness verified against the ground truth facts, (2) completeness, (3) precision of file/line references, (4) whether it used the right tools/approach to find information. Flag any fabricated code or incorrect type/signature claims — cross-check against the ground truth and available source files.
 
 ## Efficiency Analysis
 Compare runtime, token usage, and cost across all scenarios. Identify which scenarios were most efficient, note any surprising differences, and recommend the best quality-to-cost tradeoff." \
@@ -349,8 +383,6 @@ emit_overall_comparison() {
   local wins_mcp_only=0
   local wins_mcp_full=0
 
-  local runner_ups=()
-
   for q_idx in "${Q_INDICES[@]}"; do
     local slug="${Q_SLUGS[$q_idx]}"
     local difficulty="${Q_DIFFICULTY[$q_idx]}"
@@ -368,24 +400,9 @@ emit_overall_comparison() {
       esac
     fi
 
-    # Find runner-up: second-lowest cost among runs that have metrics, excluding winner
-    local runner_up="—"
-    local best_cost_scaled=999999999
-    for model in "${MODELS[@]}"; do
-      for scenario in baseline solo together; do
-        local run_key="${model}/${scenario}"
-        [[ "$run_key" == "$winner" ]] && continue
-        local mf="$RESULTS_DIR/${slug}-${model}-${scenario}-metrics.json"
-        if [[ -f "$mf" ]]; then
-          local cost_scaled
-          cost_scaled=$(jq -r '(.cost_usd * 100000) | round' "$mf")
-          if (( cost_scaled < best_cost_scaled )); then
-            best_cost_scaled=$cost_scaled
-            runner_up="$run_key"
-          fi
-        fi
-      done
-    done
+    # Find runner-up: quality-ranked second place from judge brief
+    local runner_up="---"
+    [[ -f "$brief_file" ]] && runner_up=$(extract_runner_up "$brief_file")
 
     local lang="${Q_LANG[$q_idx]}"
     echo "| $slug | $lang | $difficulty | $winner | $runner_up |"
