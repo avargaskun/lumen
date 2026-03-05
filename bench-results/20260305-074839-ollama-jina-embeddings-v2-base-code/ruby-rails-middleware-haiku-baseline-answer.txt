@@ -1,0 +1,305 @@
+## Rails Middleware Stack Architecture
+
+Based on the Ruby fixtures, here's a comprehensive breakdown of how the Rails middleware stack works:
+
+---
+
+### **1. Rack Middleware Fundamentals**
+
+All Rack middleware follows a simple interface: **`call(env) → [status, headers, body]`**
+
+```ruby
+# Basic Rack middleware structure
+class MyMiddleware
+  def initialize(app)
+    @app = app  # Store next middleware/endpoint
+  end
+  
+  def call(env)
+    # Before request
+    status, headers, body = @app.call(env)
+    # After response
+    [status, headers, body]
+  end
+end
+```
+
+---
+
+### **2. ActionController Metal Middleware (metal.rb:18-63)**
+
+Rails Controllers use **`ActionController::MiddlewareStack`** which extends `ActionDispatch::MiddlewareStack` with action-filtering support:
+
+**Key Classes:**
+
+| Class | Purpose |
+|-------|---------|
+| `ActionController::MiddlewareStack` | Extends ActionDispatch stack with action filtering |
+| `ActionController::MiddlewareStack::Middleware` | Wraps middleware with action validation logic |
+
+**Middleware Registration with Action Filtering** (metal.rb:14-16):
+
+```ruby
+class PostsController < ApplicationController
+  use AuthenticationMiddleware, except: [:index, :show]
+  use AdminMiddleware, only: [:edit, :delete]
+end
+```
+
+**Build Strategy** (metal.rb:31-37):
+
+```ruby
+def build(action, app = nil, &block)
+  action = action.to_s
+  
+  # Reverse and compose middleware chain
+  middlewares.reverse.inject(app || block) do |a, middleware|
+    middleware.valid?(action) ? middleware.build(a) : a
+  end
+end
+```
+
+**Action Validation Strategies** (metal.rb:40-42):
+
+```ruby
+INCLUDE = ->(list, action) { list.include? action }
+EXCLUDE = ->(list, action) { !list.include? action }
+NULL    = ->(list, action) { true }  # Always include
+```
+
+**Middleware Creation** (metal.rb:44-62):
+
+```ruby
+def build_middleware(klass, args, block)
+  options = args.extract_options!
+  only   = Array(options.delete(:only)).map(&:to_s)
+  except = Array(options.delete(:except)).map(&:to_s)
+  args << options unless options.empty?
+  
+  # Choose strategy
+  strategy = NULL
+  list = nil
+  
+  if only.any?
+    strategy = INCLUDE
+    list = only
+  elsif except.any?
+    strategy = EXCLUDE
+    list = except
+  end
+  
+  # Create middleware with action validation
+  Middleware.new(klass, args, list, strategy, block)
+end
+```
+
+---
+
+### **3. Metal Controller Request Flow (metal.rb:315-327)**
+
+```ruby
+def self.action(name)
+  # Create Rack endpoint (the final app)
+  app = lambda { |env|
+    req = ActionDispatch::Request.new(env)
+    res = make_response! req
+    new.dispatch(name, req, res)
+  }
+  
+  # Wrap with middleware stack if any exist
+  if middleware_stack.any?
+    middleware_stack.build(name, app)
+  else
+    app
+  end
+end
+```
+
+**Dispatch Flow** (metal.rb:249-255):
+
+```ruby
+def dispatch(name, request, response)
+  set_request!(request)
+  set_response!(response)
+  process(name)           # Call action method
+  request.commit_flash
+  to_a                    # Return [status, headers, body]
+end
+```
+
+---
+
+### **4. Rails Engine Middleware Assembly (engine.rb:514-522)**
+
+**Thread-Safe Middleware Building:**
+
+```ruby
+def app
+  @app || @app_build_lock.synchronize {
+    @app ||= begin
+      # 1. Get default ActionDispatch middleware stack
+      stack = default_middleware_stack
+      
+      # 2. Merge custom middleware (config.middleware.use(...))
+      config.middleware = build_middleware.merge_into(stack)
+      
+      # 3. Build final composition, with endpoint as base
+      config.middleware.build(endpoint)
+    end
+  }
+end
+```
+
+**Rack Interface Implementation** (engine.rb:532-535):
+
+```ruby
+def call(env)
+  req = build_request env
+  app.call req.env  # Call built middleware stack
+end
+```
+
+**Initialization Pattern** (engine.rb:48-50):
+
+```ruby
+class MyEngine < Rails::Engine
+  initializer "my_engine.add_middleware" do |app|
+    app.middleware.use MyEngine::Middleware
+  end
+end
+```
+
+---
+
+### **5. Sinatra Middleware Assembly (sinatra-base.rb excerpt)**
+
+Sinatra uses standard **`Rack::Builder`** composition:
+
+```ruby
+class Sinatra::Base
+  def self.build(app)
+    new_app = proc { |env| new(env).handle_request }
+    
+    Rack::Builder.new do
+      setup_default_middleware(self)
+      setup_middleware(self)
+      run new_app
+    end.to_app
+  end
+  
+  def self.setup_default_middleware(builder)
+    builder.use Rack::MethodOverride if method_override?
+    builder.use Rack::Head
+    builder.use Sinatra::ShowExceptions
+  end
+  
+  def self.setup_middleware(builder)
+    # Apply user-defined middleware
+    middleware.each { |m, a, b| builder.use(m, *a, &b) }
+  end
+end
+```
+
+**Middleware Storage** (inherited from parent classes):
+
+```ruby
+def use(middleware, *args, &block)
+  @middleware ||= []
+  @middleware << [middleware, args, block]
+end
+
+def middleware
+  superclass.middleware + @middleware if superclass.respond_to?(:middleware)
+end
+```
+
+---
+
+### **6. Rails Application Default Middleware Stack (application.rb:41-43, 66)**
+
+Rails Application uses `DefaultMiddlewareStack`:
+
+```ruby
+class Rails::Application < Engine
+  autoload :DefaultMiddlewareStack, "rails/application/default_middleware_stack"
+  
+  # Built middleware stack includes:
+  # - Rack::Sendfile
+  # - ActionDispatch::Static (asset serving)
+  # - Rack::MethodOverride
+  # - ActionDispatch::RequestId
+  # - ActionDispatch::Executor
+  # - ActiveRecord::ConnectionAdapters::ConnectionPool::Reaper
+  # - Rails::Rack::Logger
+  # - ActionDispatch::ShowExceptions
+  # - ActionDispatch::DebugExceptions
+  # - ActionDispatch::RemoteIp
+  # - ActionDispatch::Callbacks
+  # - ActionDispatch::Session::CookieStore
+  # - ActionDispatch::Flash
+  # - ActionDispatch::ContentSecurityPolicy::Middleware
+  # - ActionDispatch::PermissionsPolicy::Middleware
+  # - Rack::Head
+  # - Rack::ConditionalGet
+  # - Rack::ETag
+  # - Rack::TempfileReaper
+end
+```
+
+**Custom Middleware Configuration** (application.rb:273):
+
+```ruby
+# In config/environments/production.rb
+Rails.application.configure do
+  config.middleware.use ExceptionNotifier, config_for(:exception_notification)
+  config.middleware.delete Rack::MethodOverride
+  config.middleware.insert_before ActionDispatch::ShowExceptions, MyMiddleware
+end
+```
+
+---
+
+### **7. Complete Request Flow Diagram**
+
+```
+HTTP Request
+    ↓
+Engine.call(env)
+    ↓
+app (built middleware stack)
+    ↓
+[Middleware 1] → [Middleware 2] → ... → [Endpoint]
+    ↓              ↓                       ↓
+  Before       Before                 Handler
+    ↓              ↓                       ↓
+    └──────→ After ├─────────→ Response ←┘
+                ↓
+            After (chain unwinds)
+    ↓
+[status, headers, body]
+    ↓
+HTTP Response
+```
+
+---
+
+### **8. Key Call Signatures**
+
+| Method | Signature | Purpose |
+|--------|-----------|---------|
+| `middleware.use(...)` | `use(klass, *args, **opts, &block)` | Register middleware |
+| `middleware.build(app)` | `build(app) → Rack::App` | Compose middleware chain |
+| `middleware.call(env)` | `call(env) → [status, headers, body]` | Rack interface |
+| `Metal.action(name)` | `action(name) → Rack::App` | Get actionable endpoint |
+| `Engine.app` | `app → Rack::App` | Get built application |
+| `Engine.call(env)` | `call(env) → [status, headers, body]` | Process request |
+
+---
+
+### **Summary: Three Composition Patterns**
+
+1. **Rails Metal Controllers** — Action-aware filtering during middleware stack build
+2. **Sinatra Applications** — Simple Rack::Builder composition with inheritance
+3. **Rails Engines/Applications** — Thread-safe stack merging with default + custom layers
+
+All use the fundamental Rack interface: **middleware receives next app, calls it, wraps response**.

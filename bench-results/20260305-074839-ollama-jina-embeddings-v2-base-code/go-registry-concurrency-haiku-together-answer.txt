@@ -1,0 +1,222 @@
+Based on the code in the test fixtures, here's a comprehensive explanation of how TSDB compaction works end-to-end:
+
+## TSDB Compaction Overview
+
+Compaction is a background process that merges multiple time-series blocks into larger ones to optimize storage and query performance. The process is triggered periodically and controlled by the database.
+
+---
+
+## **Compactor Interface** (compact.go:54-77)
+
+```go
+type Compactor interface {
+	// Plan returns a set of directories that can be compacted concurrently.
+	// The directories can be overlapping.
+	Plan(dir string) ([]string, error)
+
+	// Write persists one or more Blocks into a directory.
+	// No Block is written when resulting Block has 0 samples and returns an empty slice.
+	Write(dest string, b BlockReader, mint, maxt int64, base *BlockMeta) ([]ulid.ULID, error)
+
+	// Compact runs compaction against the provided directories.
+	// Must only be called concurrently with results of Plan().
+	// Can optionally pass a list of already open blocks, to avoid having to reopen them.
+	Compact(dest string, dirs []string, open []*Block) ([]ulid.ULID, error)
+}
+```
+
+---
+
+## **LeveledCompactor** (compact.go:79-241)
+
+The main implementation that organizes blocks into levels based on time ranges:
+
+```go
+type LeveledCompactor struct {
+	metrics                     *CompactorMetrics
+	logger                      *slog.Logger
+	ranges                      []int64                           // Time ranges per level
+	chunkPool                   chunkenc.Pool                     // Reusable chunk encoding objects
+	ctx                         context.Context
+	maxBlockChunkSegmentSize    int64
+	useUncachedIO               bool
+	mergeFunc                   storage.VerticalChunkSeriesMergeFunc
+	blockExcludeFunc            BlockExcludeFilterFunc            // Filter blocks from compaction
+	postingsEncoder             index.PostingsEncoder
+	postingsDecoderFactory      PostingsDecoderFactory
+	enableOverlappingCompaction bool                              // Vertical compaction support
+}
+```
+
+### Key Constructor
+```go
+func NewLeveledCompactorWithOptions(ctx context.Context, r prometheus.Registerer, 
+	l *slog.Logger, ranges []int64, pool chunkenc.Pool, opts LeveledCompactorOptions) 
+	(*LeveledCompactor, error)
+```
+
+---
+
+## **Compaction Methods**
+
+### **1. Plan()** (compact.go:249-328)
+
+Determines which blocks can be compacted:
+
+```go
+func (c *LeveledCompactor) Plan(dir string) ([]string, error)
+```
+
+**Process:**
+1. Reads all block metadata from disk
+2. Skips blocks marked as excluded (via `blockExcludeFunc`)
+3. Calls internal `plan()` logic:
+   - **Overlapping blocks first**: Checks `selectOverlappingDirs()` if enabled
+   - **Level-based selection**: Uses `selectDirs()` to group blocks by exponential time ranges
+   - **Tombstone cleanup**: Compacts blocks with >5% deleted series
+
+**Example time ranges:** If `ExponentialBlockRanges(2h, 10, 3)` is called, it produces:
+```
+[2h, 6h, 18h, 54h, 162h, ...]  // Each is 3x the previous
+```
+
+### **2. Write()** (compact.go:586-636)
+
+Writes a single block from a BlockReader (e.g., the head block):
+
+```go
+func (c *LeveledCompactor) Write(dest string, b BlockReader, mint, maxt int64, 
+	base *BlockMeta) ([]ulid.ULID, error)
+```
+
+- Creates a new block with `Compaction.Level = 1`
+- Writes chunks, index, metadata, and tombstones
+- Returns empty slice if block has 0 samples (no-op)
+
+### **3. Compact()** (compact.go:485-584)
+
+Merges multiple blocks together:
+
+```go
+func (c *LeveledCompactor) Compact(dest string, dirs []string, 
+	open []*Block) ([]ulid.ULID, error)
+```
+
+**Steps:**
+1. Opens blocks from provided directories (reuses already-open ones)
+2. Generates a new ULID for the output block
+3. Calls `write()` with `DefaultBlockPopulator` to merge:
+   - Merges series from all input blocks
+   - Increments `Compaction.Level`
+   - Tracks parent blocks in `Compaction.Parents`
+4. Returns empty slice if result has 0 samples; marks source blocks as `Deletable`
+
+---
+
+## **Block Metadata Tracking** (block.go:19-34)
+
+```go
+type BlockMeta struct {
+	ULID       string              // Unique identifier
+	MinTime    int64               // Inclusive start time
+	MaxTime    int64               // Exclusive end time
+	Stats      BlockStats          // Sample/series/chunk counts
+	Version    int
+	Compaction BlockMetaCompaction
+}
+
+type BlockMetaCompaction struct {
+	Level   int         // 1, 2, 3, etc. (higher = more merged)
+	Sources []string    // Original block ULIDs before any compaction
+	Parents []BlockDesc // Direct parent blocks that were merged
+}
+```
+
+---
+
+## **End-to-End Compaction Flow (from DB)**
+
+### **1. Trigger Mechanism** (db.go:1225-1237)
+
+Compactions are triggered via a channel (`db.compactc`):
+
+```go
+case <-db.compactc:
+	db.metrics.compactionsTriggered.Inc()
+	db.autoCompactMtx.Lock()
+	if db.autoCompact {
+		if err := db.Compact(ctx); err != nil {
+			db.logger.Error("compaction failed", "err", err)
+			backoff = exponential(backoff, 1*time.Second, 1*time.Minute)
+		} else {
+			backoff = 0
+		}
+	} else {
+		db.metrics.compactionsSkipped.Inc()
+	}
+	db.autoCompactMtx.Unlock()
+```
+
+Compactions are sent by appenders after successful commits (in `dbAppender.Commit()` and `dbAppenderV2.Commit()`).
+
+### **2. Main Compact Method** (db.go:1414-1506)
+
+```go
+func (db *DB) Compact(ctx context.Context) (returnErr error)
+```
+
+**Head Block Compaction Loop:**
+1. Checks if head block is compactable: `head.compactable()`
+2. Applies compaction delay (if enabled) via `waitingForCompactionDelay()`
+3. Creates a `RangeHead` for the compactable time range
+4. Calls `db.compactHead(rh)` → compactor.Write()
+5. Repeats until no more head blocks can be compacted
+
+**Persistent Block Compaction:**
+1. Calls `db.compactBlocks()`:
+   - Loop: Call `compactor.Plan()` → `compactor.Compact()` → reload blocks
+   - Stops if head becomes compactable (to avoid blocking new data writes)
+
+### **3. Stale Series Compaction** (db.go:1664-1745)
+
+```go
+func (db *DB) CompactStaleHead() (err error)
+```
+
+Triggered if stale series ratio exceeds threshold:
+- Creates a `StaleHead` reader
+- Writes blocks only containing remaining (non-stale) series
+- Rebuilds symbol table after completion
+
+### **4. Out-of-Order (OOO) Compaction** (db.go:1523-1631)
+
+```go
+func (db *DB) CompactOOOHead(ctx context.Context) error
+```
+
+Handles data written outside the normal time window:
+- Creates per-block-range OOO blocks
+- Marks them with `Compaction.SetOutOfOrder()`
+- Allows later vertical compaction with in-order blocks
+
+---
+
+## **Deletion After Compaction**
+
+Once a block is compacted:
+1. Source blocks are marked `meta.Compaction.Deletable = true`
+2. New blocks store parent references: `Compaction.Parents`
+3. During block reload, source blocks are deleted if not referenced by any newer block
+
+---
+
+## **Key Design Points**
+
+| Concept | Purpose |
+|---------|---------|
+| **Exponential ranges** | Minimize merging overhead while reducing block count logarithmically |
+| **Compaction levels** | Track how many times a series has been merged (higher = more stable) |
+| **Parent tracking** | Enable safe deletion; old blocks can be purged once parents exist |
+| **Chunk pool** | Reuse encoding/decoding objects to reduce GC pressure |
+| **Overlapping detection** | Vertical compaction merges blocks with overlapping time ranges |
+| **Delay + throttling** | Prevents compaction from starving new writes during high-load periods |

@@ -20,7 +20,8 @@ run_bench() {
   bash "$REPO/bench-mcp.sh" --embed-model "$embed_model" "${EXTRA_ARGS[@]:+${EXTRA_ARGS[@]}}"
 }
 
+run_bench "qwen3-embedding:0.6b (Ollama)"                 "qwen3-embedding:0.6b"
 run_bench "ordis/jina-embeddings-v2-base-code (Ollama)" "ordis/jina-embeddings-v2-base-code"
 run_bench "qwen3-embedding:8b (Ollama)"                 "qwen3-embedding:8b"
-run_bench "qwen3-embedding:8b (Ollama)"                 "qwen3-embedding:4b"
+run_bench "qwen3-embedding:4b (Ollama)"                 "qwen3-embedding:4b"
 run_bench "nomic-ai/nomic-embed-code-GGUF (LM Studio)"  "nomic-ai/nomic-embed-code-GGUF"

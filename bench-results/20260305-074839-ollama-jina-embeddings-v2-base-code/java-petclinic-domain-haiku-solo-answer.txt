@@ -1,0 +1,236 @@
+## PetClinic Domain Model Structure
+
+The PetClinic model uses a **layered inheritance hierarchy** with JPA entities and relationships:
+
+### Entity Hierarchy
+
+```
+BaseEntity (@MappedSuperclass)
+  ├── NamedEntity
+  │   ├── Person
+  │   │   ├── Owner
+  │   │   └── Vet
+  │   ├── Pet
+  │   ├── PetType
+  │   └── Specialty
+  └── Visit
+```
+
+**BaseEntity** (testdata/fixtures/java/BaseEntity.java:9-18):
+```java
+@MappedSuperclass
+public class BaseEntity implements Serializable {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+    
+    public Integer getId() { return id; }
+    public void setId(Integer id) { this.id = id; }
+    public boolean isNew() { return this.id == null; }
+}
+```
+
+**NamedEntity** (extends BaseEntity, adds common name field):
+```java
+@MappedSuperclass
+public class NamedEntity extends BaseEntity {
+    @Column(name = "name")
+    @NotBlank
+    private String name;
+    
+    public String getName() { return this.name; }
+    public void setName(String name) { this.name = name; }
+}
+```
+
+**Person** (extends NamedEntity, adds firstName/lastName for Owner & Vet):
+```java
+@Entity
+@Table(name = "persons")
+public class Person extends NamedEntity {
+    @Column(name = "first_name")
+    @NotBlank
+    private String firstName;
+    
+    @Column(name = "last_name")
+    @NotBlank
+    private String lastName;
+    
+    public String getFirstName() { return this.firstName; }
+    public void setFirstName(String firstName) { this.firstName = firstName; }
+    public String getLastName() { return this.lastName; }
+    public void setLastName(String lastName) { this.lastName = lastName; }
+}
+```
+
+### Core Entities & Relationships
+
+**Owner** (testdata/fixtures/java/Owner.java:47+):
+```java
+@Entity
+@Table(name = "owners")
+public class Owner extends Person {
+    @Column
+    @NotBlank
+    private String address;
+    
+    @Column
+    @NotBlank
+    private String city;
+    
+    @Column
+    @NotBlank
+    @Pattern(regexp = "\\d{10}", message = "{telephone.invalid}")
+    private String telephone;
+    
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @JoinColumn(name = "owner_id")
+    @OrderBy("name")
+    private final List<Pet> pets = new ArrayList<>();
+    
+    public List<Pet> getPets() { return this.pets; }
+    public Pet getPet(String name) { /* lookup by name */ }
+    public Pet getPet(Integer id) { /* lookup by id */ }
+    public void addPet(Pet pet) { if (pet.isNew()) getPets().add(pet); }
+    public void addVisit(Integer petId, Visit visit) { /* delegates to pet */ }
+}
+```
+- **OneToMany to Pet**: cascade all operations, eager loading, ordered by name
+- **Methods**: `getPet(String)`, `getPet(Integer)` for lookup; `addPet()` and `addVisit()` for mutations
+
+**Pet** (testdata/fixtures/java/Pet.java:44+):
+```java
+@Entity
+@Table(name = "pets")
+public class Pet extends NamedEntity {
+    @Column
+    @DateTimeFormat(pattern = "yyyy-MM-dd")
+    private LocalDate birthDate;
+    
+    @ManyToOne
+    @JoinColumn(name = "type_id")
+    private PetType type;
+    
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @JoinColumn(name = "pet_id")
+    @OrderBy("date ASC")
+    private final Set<Visit> visits = new LinkedHashSet<>();
+    
+    public LocalDate getBirthDate() { return this.birthDate; }
+    public void setBirthDate(LocalDate birthDate) { this.birthDate = birthDate; }
+    public PetType getType() { return this.type; }
+    public void setType(PetType type) { this.type = type; }
+    public Collection<Visit> getVisits() { return this.visits; }
+    public void addVisit(Visit visit) { getVisits().add(visit); }
+}
+```
+- **ManyToOne to PetType**: implicit foreign key `type_id`
+- **OneToMany to Visit**: cascade all, eager loading, ordered by date ascending
+
+**Visit** (testdata/fixtures/java/Visit.java:34+):
+```java
+@Entity
+@Table(name = "visits")
+public class Visit extends BaseEntity {
+    @Column(name = "visit_date")
+    @DateTimeFormat(pattern = "yyyy-MM-dd")
+    private LocalDate date;
+    
+    @NotBlank
+    private String description;
+    
+    public Visit() { this.date = LocalDate.now(); }
+    
+    public LocalDate getDate() { return this.date; }
+    public void setDate(LocalDate date) { this.date = date; }
+    public String getDescription() { return this.description; }
+    public void setDescription(String description) { this.description = description; }
+}
+```
+- Owned by Pet via one-to-many; defaults to current date on creation
+
+**Vet** (testdata/fixtures/java/Vet.java:43+):
+```java
+@Entity
+@Table(name = "vets")
+public class Vet extends Person {
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(name = "vet_specialties", 
+               joinColumns = @JoinColumn(name = "vet_id"),
+               inverseJoinColumns = @JoinColumn(name = "specialty_id"))
+    private Set<Specialty> specialties;
+    
+    protected Set<Specialty> getSpecialtiesInternal() {
+        if (this.specialties == null) {
+            this.specialties = new HashSet<>();
+        }
+        return this.specialties;
+    }
+    
+    public List<Specialty> getSpecialties() {
+        return getSpecialtiesInternal().stream()
+            .sorted(Comparator.comparing(NamedEntity::getName))
+            .collect(Collectors.toList());
+    }
+    
+    public int getNrOfSpecialties() { return getSpecialtiesInternal().size(); }
+    public void addSpecialty(Specialty specialty) { getSpecialtiesInternal().add(specialty); }
+}
+```
+- **ManyToMany to Specialty**: join table `vet_specialties`, eager loading, returned sorted by name
+
+**PetType & Specialty** (testdata/fixtures/java/PetType.java, Specialty.java):
+```java
+@Entity
+@Table(name = "types")
+public class PetType extends NamedEntity { }
+
+@Entity
+@Table(name = "specialties")
+public class Specialty extends NamedEntity { }
+```
+- Simple lookup tables, only inherit id + name from NamedEntity
+
+### Repository Layer
+
+**OwnerRepository** (testdata/fixtures/java/OwnerRepository.java:36+):
+```java
+public interface OwnerRepository extends JpaRepository<Owner, Integer> {
+    Page<Owner> findByLastNameStartingWith(String lastName, Pageable pageable);
+    Optional<Owner> findById(Integer id);
+}
+```
+- Query method: `findByLastNameStartingWith()` for pagination
+- Standard `findById()` returning `Optional<Owner>`
+
+**VetRepository** (testdata/fixtures/java/VetRepository.java:38+):
+```java
+public interface VetRepository extends Repository<Vet, Integer> {
+    @Transactional(readOnly = true)
+    @Cacheable("vets")
+    Collection<Vet> findAll() throws DataAccessException;
+    
+    @Transactional(readOnly = true)
+    @Cacheable("vets")
+    Page<Vet> findAll(Pageable pageable) throws DataAccessException;
+}
+```
+- Minimal repository (not JpaRepository), read-only with caching
+- `@Cacheable("vets")` on both `findAll()` methods
+
+**PetTypeRepository** (testdata/fixtures/java/PetTypeRepository.java:7+):
+```java
+public interface PetTypeRepository extends JpaRepository<PetType, Integer> {
+    List<PetType> findAll();
+    PetType findByName(String name);
+}
+```
+- Custom `findByName()` for lookup by type name
+
+### Key Design Patterns
+
+1. **Inheritance chain**: Reuses id, name, firstName/lastName across multiple entities
+2. **Cascading**: Owner→Pet and Pet→Visit use `cascade = CascadeType.ALL` for deep deletions
+3. **Eager loading**: All relationships use `FetchType.EAGER` to avoid N+1 queries
+4. **Ordering**: Pets ordered by name, visits by date, specialties by name
+5. **Spring Data repositories**: Declarative query methods, Spring manages SQL generation and caching

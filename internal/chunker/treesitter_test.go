@@ -59,7 +59,7 @@ func TestTreeSitterChunker_Python(t *testing.T) {
 
 	checkChunk(t, bySymbol, "greet", "function", 1, 3, "sample.py", "def greet")
 	checkChunk(t, bySymbol, "Animal", "type", 5, 7, "sample.py", "")
-	checkChunk(t, bySymbol, "speak", "function", 0, 0, "sample.py", "")
+	checkChunk(t, bySymbol, "Animal.speak", "function", 0, 0, "sample.py", "")
 }
 
 func checkChunk(t *testing.T, bySymbol map[string]chunker.Chunk, symbol, kind string, startLine, endLine int, filePath, contentContains string) {
@@ -179,7 +179,7 @@ func TestTreeSitterChunker_TypeScript(t *testing.T) {
 	check("add", "function")
 	check("Calculator", "type")
 	check("Base", "type")
-	check("multiply", "method")
+	check("Calculator.multiply", "method")
 	check("Shape", "interface")
 	check("Color", "type")
 }
@@ -286,7 +286,7 @@ func TestTreeSitterChunker_JavaScript(t *testing.T) {
 
 	check("greet", "function")
 	check("Animal", "type")
-	check("speak", "method")
+	check("Animal.speak", "method")
 }
 
 var sampleTSX = []byte(`export function render(): JSX.Element {
@@ -325,8 +325,8 @@ func TestTreeSitterChunker_TSX(t *testing.T) {
 	if !bySymbolKind["render"]["function"] {
 		t.Errorf("missing chunk render/function (got symbols: %v)", symbolNames(chunks))
 	}
-	if !bySymbolKind["render"]["method"] {
-		t.Errorf("missing chunk render/method (got symbols: %v)", symbolNames(chunks))
+	if !bySymbolKind["App.render"]["method"] {
+		t.Errorf("missing chunk App.render/method (got symbols: %v)", symbolNames(chunks))
 	}
 	if !bySymbolKind["App"]["type"] {
 		t.Errorf("missing chunk App/type (got symbols: %v)", symbolNames(chunks))
@@ -375,7 +375,7 @@ func TestTreeSitterChunker_Ruby(t *testing.T) {
 
 	check("greet", "function")
 	check("Animal", "type")
-	check("speak", "function") // Ruby methods map to "function" kind
+	check("Animal.speak", "function") // Ruby methods map to "function" kind
 }
 
 var sampleJava = []byte(`public class Calculator {
@@ -415,7 +415,7 @@ func TestTreeSitterChunker_Java(t *testing.T) {
 	}
 
 	check("Calculator", "type")
-	check("add", "method")
+	check("Calculator.add", "method")
 }
 
 var sampleC = []byte(`int add(int a, int b) {
@@ -507,6 +507,74 @@ func TestTreeSitterChunker_CPP(t *testing.T) {
 
 	check("Vec2", "type")
 	check("add", "function")
+}
+
+func TestTreeSitterChunker_MethodChunkContainsClassHeader(t *testing.T) {
+	langs := chunker.DefaultLanguages(512)
+
+	tests := []struct {
+		ext        string
+		src        []byte
+		method     string
+		headerFrag string // substring expected in method chunk content
+	}{
+		{
+			ext: ".java",
+			src: []byte(`public class Calculator {
+    public int add(int a, int b) {
+        return a + b;
+    }
+}`),
+			method:     "Calculator.add",
+			headerFrag: "public class Calculator",
+		},
+		{
+			ext: ".ts",
+			src: []byte(`export class Calculator {
+  multiply(x: number, y: number): number {
+    return x * y;
+  }
+}`),
+			method: "Calculator.multiply",
+			// "export" is a separate AST wrapper; the class_declaration node starts at "class"
+			headerFrag: "class Calculator",
+		},
+		{
+			ext: ".rb",
+			src: []byte(`class Animal
+  def speak
+    "..."
+  end
+end`),
+			method:     "Animal.speak",
+			headerFrag: "class Animal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ext, func(t *testing.T) {
+			c, ok := langs[tt.ext]
+			if !ok {
+				t.Fatalf("DefaultLanguages() missing %q", tt.ext)
+			}
+			chunks, err := c.Chunk("test"+tt.ext, tt.src)
+			if err != nil {
+				t.Fatalf("Chunk: %v", err)
+			}
+			bySymbol := make(map[string]chunker.Chunk)
+			for _, ch := range chunks {
+				bySymbol[ch.Symbol] = ch
+			}
+			ch, ok := bySymbol[tt.method]
+			if !ok {
+				t.Fatalf("missing chunk %q (got: %v)", tt.method, symbolNames(chunks))
+			}
+			if !strings.Contains(ch.Content, tt.headerFrag) {
+				t.Errorf("method chunk %q content does not contain class header %q\ncontent:\n%s",
+					tt.method, tt.headerFrag, ch.Content)
+			}
+		})
+	}
 }
 
 func symbolNames(chunks []chunker.Chunk) []string {

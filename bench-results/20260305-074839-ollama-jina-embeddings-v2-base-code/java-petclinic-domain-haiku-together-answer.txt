@@ -1,0 +1,208 @@
+## PetClinic Domain Model Structure
+
+### Entity Hierarchy
+
+The PetClinic domain follows a **class inheritance hierarchy** with JPA's `@MappedSuperclass` pattern:
+
+```
+BaseEntity (abstract, @MappedSuperclass)
+    ├─ NamedEntity (adds name field)
+    │   ├─ Person (@Entity, single table inheritance)
+    │   │   ├─ Owner (@Entity)
+    │   │   └─ Vet (@Entity)
+    │   ├─ PetType (@Entity)
+    │   └─ Specialty (@Entity)
+    └─ Visit (@Entity)
+        └─ Pet (extends NamedEntity instead)
+```
+
+### Key Classes & JPA Mappings
+
+#### **BaseEntity** (`BaseEntity.java:10`)
+Root abstract class with ID generation:
+```java
+@MappedSuperclass
+public class BaseEntity implements Serializable {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+    public boolean isNew() { return this.id == null; }
+}
+```
+- Uses identity (auto-increment) ID strategy
+- Provides `isNew()` method to check if entity is persisted
+
+#### **NamedEntity** (`NamedEntity.java:8`)
+Adds a name field for reusable entities:
+```java
+@MappedSuperclass
+public class NamedEntity extends BaseEntity {
+    @Column(name = "name")
+    @NotBlank
+    private String name;
+}
+```
+
+#### **Person** (`Person.java:10`)
+Maps to `persons` table using **single table inheritance**:
+```java
+@Entity
+@Table(name = "persons")
+public class Person extends NamedEntity {
+    @Column(name = "first_name")
+    @NotBlank
+    private String firstName;
+    
+    @Column(name = "last_name")
+    @NotBlank
+    private String lastName;
+}
+```
+- Both Owner and Vet inherit from this, sharing same table with discriminator column logic
+
+#### **Owner** (`Owner.java:49`)
+Pet owner entity with one-to-many relationship:
+```java
+@Entity
+@Table(name = "owners")
+public class Owner extends Person {
+    @Column @NotBlank
+    private String address;
+    
+    @Column @NotBlank
+    private String city;
+    
+    @Column @NotBlank
+    @Pattern(regexp = "\\d{10}")
+    private String telephone;
+    
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @JoinColumn(name = "owner_id")
+    @OrderBy("name")
+    private final List<Pet> pets = new ArrayList<>();
+}
+```
+**Key methods:**
+- `addPet(Pet)`: Adds new pet if not already persisted
+- `getPet(String name)`: Finds pet by name
+- `getPet(Integer id)`: Finds pet by ID
+- `addVisit(Integer petId, Visit visit)`: Adds visit to pet
+
+#### **Pet** (`Pet.java:46`)
+```java
+@Entity
+@Table(name = "pets")
+public class Pet extends NamedEntity {
+    @Column
+    @DateTimeFormat(pattern = "yyyy-MM-dd")
+    private LocalDate birthDate;
+    
+    @ManyToOne
+    @JoinColumn(name = "type_id")
+    private PetType type;  // Foreign key relationship
+    
+    @OneToMany(cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @JoinColumn(name = "pet_id")
+    @OrderBy("date ASC")
+    private final Set<Visit> visits = new LinkedHashSet<>();
+}
+```
+**Relationships:**
+- `@ManyToOne PetType`: Each pet has one type (Dog, Cat, etc.), many pets per type
+- `@OneToMany Visit`: Each pet has many visits, cascade delete/persist
+
+#### **Visit** (`Visit.java:36`)
+Appointment record for a pet:
+```java
+@Entity
+@Table(name = "visits")
+public class Visit extends BaseEntity {
+    @Column(name = "visit_date")
+    @DateTimeFormat(pattern = "yyyy-MM-dd")
+    private LocalDate date;
+    
+    @NotBlank
+    private String description;
+}
+```
+
+#### **Vet** (`Vet.java:45`)
+Veterinarian with many-to-many specialties:
+```java
+@Entity
+@Table(name = "vets")
+public class Vet extends Person {
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "vet_specialties",
+        joinColumns = @JoinColumn(name = "vet_id"),
+        inverseJoinColumns = @JoinColumn(name = "specialty_id")
+    )
+    private Set<Specialty> specialties;
+}
+```
+**Key methods:**
+- `addSpecialty(Specialty)`: Adds specialty
+- `getSpecialties()`: Returns sorted list of specialties
+- `getNrOfSpecialties()`: Returns count
+
+#### **Supporting Types** (`PetType.java`, `Specialty.java`)
+```java
+@Entity @Table(name = "types")
+public class PetType extends NamedEntity {}
+
+@Entity @Table(name = "specialties")
+public class Specialty extends NamedEntity {}
+```
+
+---
+
+### Repository Layer
+
+#### **OwnerRepository** (`OwnerRepository.java:36`)
+Extends `JpaRepository<Owner, Integer>` for full CRUD:
+```java
+public interface OwnerRepository extends JpaRepository<Owner, Integer> {
+    Page<Owner> findByLastNameStartingWith(String lastName, Pageable pageable);
+    Optional<Owner> findById(Integer id);
+}
+```
+- Derived query methods using Spring Data naming conventions
+- Pagination support via `Page<Owner>` and `Pageable`
+
+#### **VetRepository** (`VetRepository.java:38`)
+Extends `Repository<Vet, Integer>` (minimal interface):
+```java
+public interface VetRepository extends Repository<Vet, Integer> {
+    @Transactional(readOnly = true)
+    @Cacheable("vets")
+    Collection<Vet> findAll() throws DataAccessException;
+    
+    @Transactional(readOnly = true)
+    @Cacheable("vets")
+    Page<Vet> findAll(Pageable pageable) throws DataAccessException;
+}
+```
+- Read-only transactions with caching
+- No write operations exposed
+
+#### **PetTypeRepository** (`PetTypeRepository.java:7`)
+```java
+public interface PetTypeRepository extends JpaRepository<PetType, Integer> {
+    List<PetType> findAll();
+    PetType findByName(String name);
+}
+```
+
+---
+
+### Relationship Summary
+
+| Relationship | From | To | Type | Mapping |
+|---|---|---|---|---|
+| Owner → Pets | Owner | Pet | 1:N | `@OneToMany` + `@JoinColumn(owner_id)` |
+| Pet → Type | Pet | PetType | N:1 | `@ManyToOne` + `@JoinColumn(type_id)` |
+| Pet → Visits | Pet | Visit | 1:N | `@OneToMany` + `@JoinColumn(pet_id)` |
+| Vet → Specialties | Vet | Specialty | N:M | `@ManyToMany` + `@JoinTable(vet_specialties)` |
+
+**Cascade Strategy:** All relationships use `CascadeType.ALL`, meaning deleting an owner deletes their pets and visits.

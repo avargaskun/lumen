@@ -186,7 +186,11 @@ func (idx *Indexer) indexWithTree(ctx context.Context, projectDir string, force 
 		}
 		texts := make([]string, len(batch))
 		for i, c := range batch {
-			texts[i] = "// " + c.FilePath + "\n" + c.Content
+			prefix := "// " + c.FilePath + "\n"
+			if c.Symbol != "" {
+				prefix = "// " + c.FilePath + " \u2014 " + c.Symbol + "\n"
+			}
+			texts[i] = prefix + c.Content
 		}
 		vectors, err := idx.emb.Embed(ctx, texts)
 		if err != nil {

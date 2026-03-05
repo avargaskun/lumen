@@ -17,6 +17,7 @@ package chunker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -104,14 +105,78 @@ func (c *TreeSitterChunker) Chunk(filePath string, content []byte) ([]Chunk, err
 				continue
 			}
 
-			symbol := nameNode.Content(content)
 			startLine := int(declNode.StartPoint().Row) + 1
 			endLine := int(declNode.EndPoint().Row) + 1
 			snippet := declNode.Content(content)
+			symbol := nameNode.Content(content)
+			if rule.kind == "method" || rule.kind == "function" {
+				if parentNode, className := findEnclosingType(declNode, content); className != "" {
+					symbol = className + "." + symbol
+					if header := extractClassHeader(parentNode, content); header != "" {
+						snippet = header + "\n    // ...\n" + snippet
+					}
+				}
+			}
 
 			chunks = append(chunks, makeChunk(filePath, symbol, rule.kind, startLine, endLine, snippet))
 		}
 	}
 
 	return chunks, nil
+}
+
+// findEnclosingType walks up the AST looking for a class/module/impl container
+// and returns both the container node and its source name. Returns nil, "" if
+// the node is at module scope.
+func findEnclosingType(node *sitter.Node, content []byte) (*sitter.Node, string) {
+	for p := node.Parent(); p != nil; p = p.Parent() {
+		switch p.Type() {
+		case "class_declaration", "abstract_class_declaration", "class_specifier",
+			"class_definition",
+			"class", "module",
+			"internal_module",
+			"trait_item", "struct_item",
+			"interface_declaration":
+			if nameChild := p.ChildByFieldName("name"); nameChild != nil {
+				return p, nameChild.Content(content)
+			}
+		case "impl_item":
+			if typeChild := p.ChildByFieldName("type"); typeChild != nil {
+				return p, typeChild.Content(content)
+			}
+		case "singleton_class":
+			if outer := p.Parent(); outer != nil {
+				switch outer.Type() {
+				case "class", "module":
+					if nameChild := outer.ChildByFieldName("name"); nameChild != nil {
+						return outer, nameChild.Content(content)
+					}
+				}
+			}
+		}
+	}
+	return nil, ""
+}
+
+// extractClassHeader returns the opening declaration line(s) of a type node —
+// everything up to and including the first line ending with '{', ':', or ' do',
+// capped at 5 lines. This provides method chunks with enclosing class context.
+func extractClassHeader(node *sitter.Node, content []byte) string {
+	nodeContent := node.Content(content)
+	lines := strings.SplitAfter(nodeContent, "\n")
+	var headerLines []string
+	for i, line := range lines {
+		headerLines = append(headerLines, line)
+		trimmed := strings.TrimRight(line, " \t\r\n")
+		if strings.HasSuffix(trimmed, "{") ||
+			strings.HasSuffix(trimmed, ":") ||
+			strings.HasSuffix(trimmed, " do") ||
+			trimmed == "do" {
+			break
+		}
+		if i >= 4 {
+			break
+		}
+	}
+	return strings.Join(headerLines, "")
 }

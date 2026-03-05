@@ -1,0 +1,86 @@
+Based on the Java fixtures available, here's the domain model structure:
+
+## Entity Hierarchy
+
+### **Base Inheritance Chain**
+```
+BaseEntity (abstract)
+    ↓
+NamedEntity (abstract)
+    ↓
+Person (concrete entity)
+```
+
+### **1. BaseEntity** (`testdata/fixtures/java/BaseEntity.java:10-18`)
+```java
+@MappedSuperclass
+public class BaseEntity implements Serializable {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Integer id;
+    
+    public boolean isNew() { return this.id == null; }
+}
+```
+- **Role**: Abstract superclass for all entities
+- **Annotation**: `@MappedSuperclass` — properties inherited by subclasses but no table created
+- **Key Field**: Auto-incrementing `id` via `GenerationType.IDENTITY`
+- **Utility**: `isNew()` detects unsaved entities
+
+### **2. NamedEntity** (`testdata/fixtures/java/NamedEntity.java:8-15`)
+```java
+@MappedSuperclass
+public class NamedEntity extends BaseEntity {
+    @Column(name = "name")
+    @NotBlank
+    private String name;
+}
+```
+- **Role**: Intermediate superclass for named entities
+- **Validation**: `@NotBlank` enforces non-empty names
+- **Mapping**: Explicit column name via `@Column`
+
+### **3. Person** (`testdata/fixtures/java/Person.java:10-24`)
+```java
+@Entity
+@Table(name = "persons")
+public class Person extends NamedEntity {
+    @Column(name = "first_name")
+    @NotBlank
+    private String firstName;
+    
+    @Column(name = "last_name")
+    @NotBlank
+    private String lastName;
+}
+```
+- **Role**: Concrete entity (likely base for Owner/Vet)
+- **Annotation**: `@Entity` with table mapping
+- **Columns**: `id`, `name`, `first_name`, `last_name`
+
+## Repository Layer
+
+### **PetTypeRepository** (`testdata/fixtures/java/PetTypeRepository.java:7-10`)
+```java
+public interface PetTypeRepository extends JpaRepository<PetType, Integer> {
+    List<PetType> findAll();
+    PetType findByName(String name);
+}
+```
+- **Framework**: Spring Data JPA
+- **Generic Methods** (inherited from `JpaRepository`):
+  - `save()`, `delete()`, `findById()`, pagination, batch ops
+- **Custom Query Methods**:
+  - `findByName()` — derived from method naming convention
+
+## JPA/Hibernate Mapping Summary
+
+| Feature | Implementation |
+|---------|---|
+| **Inheritance** | Table-per-class via `@MappedSuperclass` |
+| **Primary Key** | Database-generated identity, null-based detection |
+| **Validation** | Jakarta Bean Validation (`@NotBlank`) |
+| **Column Mapping** | Explicit `@Column` with snake_case naming |
+| **Data Access** | Spring Data JPA with derived query methods |
+
+**Note**: This is a partial fixture set. The complete PetClinic model would include `Owner`, `Pet`, `Visit`, `Vet` entities (likely extending `Person`), plus repositories for each with `@OneToMany`, `@ManyToOne` relationships for visits and vet assignments.

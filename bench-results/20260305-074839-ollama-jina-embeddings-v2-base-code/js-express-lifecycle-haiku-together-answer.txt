@@ -1,0 +1,361 @@
+# Express Request/Response Lifecycle
+
+Based on the source code, here's how Express handles the complete lifecycle:
+
+## 1. **Application Initialization** (express-express.js:36-56)
+
+```javascript
+function createApplication() {
+  var app = function(req, res, next) {
+    app.handle(req, res, next);  // App itself is a middleware function
+  };
+
+  mixin(app, EventEmitter.prototype, false);
+  mixin(app, proto, false);
+
+  // Create custom request/response prototypes with app reference
+  app.request = Object.create(req, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  });
+
+  app.response = Object.create(res, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  });
+
+  app.init();
+  return app;
+}
+```
+
+**Key insight**: The app is a **function** itself. When passed to `http.createServer()`, Node calls it with `(req, res)` on each request.
+
+---
+
+## 2. **Request Entry Point** (express-application.js:152-178)
+
+The app delegates to `app.handle()`:
+
+```javascript
+app.handle = function handle(req, res, callback) {
+  // Use finalhandler for unhandled errors/404s
+  var done = callback || finalhandler(req, res, {
+    env: this.get('env'),
+    onerror: logerror.bind(this)
+  });
+
+  // Set X-Powered-By header
+  if (this.enabled('x-powered-by')) {
+    res.setHeader('X-Powered-By', 'Express');
+  }
+
+  // Create circular references for context
+  req.res = res;
+  res.req = req;
+
+  // Swap prototypes: req/res inherit app's custom methods
+  Object.setPrototypeOf(req, this.request);    // adds Express methods
+  Object.setPrototypeOf(res, this.response);   // adds Express methods
+
+  // Initialize response locals
+  if (!res.locals) {
+    res.locals = Object.create(null);
+  }
+
+  // Delegate to lazy-loaded router
+  this.router.handle(req, res, done);
+};
+```
+
+**Critical detail**: The router is **lazily instantiated** on first use:
+
+```javascript
+Object.defineProperty(this, 'router', {
+  configurable: true,
+  enumerable: true,
+  get: function getrouter() {
+    if (router === null) {
+      router = new Router({
+        caseSensitive: this.enabled('case sensitive routing'),
+        strict: this.enabled('strict routing')
+      });
+    }
+    return router;
+  }
+});
+```
+
+---
+
+## 3. **Middleware Chaining** (express-application.js:190-244)
+
+The `app.use()` method adds middleware to the router:
+
+```javascript
+app.use = function use(fn) {
+  var offset = 0;
+  var path = '/';
+
+  // Parse arguments: can be app.use(fn), app.use('/path', fn), 
+  // app.use('/path', fn1, fn2, ...), or app.use([fn1, fn2])
+  if (typeof fn !== 'function') {
+    var arg = fn;
+    while (Array.isArray(arg) && arg.length !== 0) {
+      arg = arg[0];  // Unwrap arrays
+    }
+
+    if (typeof arg !== 'function') {
+      offset = 1;
+      path = fn;  // First arg is the path
+    }
+  }
+
+  // Flatten nested arrays and extract functions
+  var fns = flatten.call(slice.call(arguments, offset), Infinity);
+
+  if (fns.length === 0) {
+    throw new TypeError('app.use() requires a middleware function');
+  }
+
+  var router = this.router;
+
+  fns.forEach(function (fn) {
+    // Check if fn is an Express app (sub-app mounting)
+    if (!fn || !fn.handle || !fn.set) {
+      return router.use(path, fn);  // Regular middleware
+    }
+
+    // Sub-app mounting: wrap the sub-app's handle method
+    debug('.use app under %s', path);
+    fn.mountpath = path;
+    fn.parent = this;
+
+    router.use(path, function mounted_app(req, res, next) {
+      var orig = req.app;
+      fn.handle(req, res, function (err) {
+        // Restore parent app's request/response prototypes
+        Object.setPrototypeOf(req, orig.request);
+        Object.setPrototypeOf(res, orig.response);
+        next(err);
+      });
+    });
+
+    fn.emit('mount', this);
+  }, this);
+
+  return this;  // Enable chaining
+};
+```
+
+**Middleware chain flow**:
+```
+1. Request arrives → app.handle() 
+2. Prototypes swapped (req/res gain Express methods)
+3. router.handle() iterates middleware in order
+4. Each middleware: (req, res, next) => {
+     - Can read from req, write to res
+     - Must call next() to continue or send response
+5. If next() called, skip to next middleware
+6. If error, skip to error-handling middleware (4-arg signature)
+7. If no handler, finalhandler sends 404/error
+```
+
+---
+
+## 4. **HTTP Verb Routing** (express-application.js:256-258, 471-503)
+
+Routes are created dynamically:
+
+```javascript
+// app.get(), app.post(), etc. - auto-generated for all HTTP verbs
+methods.forEach(function (method) {
+  app[method] = function (path) {
+    if (method === 'get' && arguments.length === 1) {
+      return this.set(path);  // app.get('setting') returns setting value
+    }
+
+    var route = this.route(path);
+    route[method].apply(route, slice.call(arguments, 1));
+    return this;
+  };
+});
+
+app.route = function route(path) {
+  return this.router.route(path);
+};
+
+app.all = function all(path) {
+  var route = this.route(path);
+  var args = slice.call(arguments, 1);
+
+  for (var i = 0; i < methods.length; i++) {
+    route[methods[i]].apply(route, args);
+  }
+  return this;
+};
+```
+
+**Usage example**:
+```javascript
+app.get('/users/:id', middleware1, middleware2, handler);
+// Creates a Route at /users/:id with GET middleware stack
+```
+
+Each route is **its own isolated middleware stack** that only executes on path + method match.
+
+---
+
+## 5. **Error Handling Middleware** (express-application.js:152-157)
+
+Error middleware has a **different signature** (4 args instead of 3):
+
+```javascript
+app.handle = function handle(req, res, callback) {
+  var done = callback || finalhandler(req, res, {
+    env: this.get('env'),
+    onerror: logerror.bind(this)
+  });
+
+  // ... setup code ...
+
+  this.router.handle(req, res, done);
+};
+```
+
+**Key**: The router's `handle()` method:
+1. Iterates middleware in registration order
+2. If middleware calls `next(err)` with an error, skips to next **error handler**
+3. Error handlers have signature: `(err, req, res, next) => {}`
+4. If no error handler catches it, `finalhandler` sends error response
+
+```javascript
+// Error middleware example (not in files, but usage):
+app.use((err, req, res, next) => {
+  // Signature: 4 args = error handler
+  // Only called when next(err) is invoked upstream
+  res.status(err.status || 500).json({ error: err.message });
+});
+```
+
+---
+
+## 6. **Sub-App Mounting & Composition** (express-application.js:220-241)
+
+When you mount a sub-app, Express wraps it:
+
+```javascript
+// In app.use(), when fn is detected as an Express app:
+if (!fn || !fn.handle || !fn.set) {
+  return router.use(path, fn);  // Regular middleware
+}
+
+// App mounting:
+fn.mountpath = path;
+fn.parent = this;
+
+router.use(path, function mounted_app(req, res, next) {
+  var orig = req.app;  // Save parent app context
+  
+  fn.handle(req, res, function (err) {
+    // Restore parent app's prototypes when sub-app finishes
+    Object.setPrototypeOf(req, orig.request);
+    Object.setPrototypeOf(res, orig.response);
+    next(err);
+  });
+});
+
+fn.emit('mount', this);
+```
+
+**Settings inheritance** (express-application.js:109-122):
+
+```javascript
+this.on('mount', function onmount(parent) {
+  // Child app inherits parent's settings
+  if (this.settings[trustProxyDefaultSymbol] === true
+    && typeof parent.settings['trust proxy fn'] === 'function') {
+    delete this.settings['trust proxy'];
+    delete this.settings['trust proxy fn'];
+  }
+
+  // Prototype chain inheritance for request/response/engines/settings
+  Object.setPrototypeOf(this.request, parent.request);
+  Object.setPrototypeOf(this.response, parent.response);
+  Object.setPrototypeOf(this.engines, parent.engines);
+  Object.setPrototypeOf(this.settings, parent.settings);
+});
+```
+
+---
+
+## 7. **Request/Response Prototypes** (express-request.js:30, express-response.js:42)
+
+Both extend Node's built-ins:
+
+```javascript
+// express-request.js
+var req = Object.create(http.IncomingMessage.prototype);
+
+// Adds methods like:
+// - req.get(name) — get header
+// - req.accepts(), req.acceptsLanguages() — content negotiation
+// - req.path, req.query, req.params — parsed URL components
+// - req.ip, req.hostname — connection info
+
+// express-response.js
+var res = Object.create(http.ServerResponse.prototype);
+
+// Adds methods like:
+// - res.status(code) — set HTTP status
+// - res.send(body) — send response with auto content-type
+// - res.json(obj) — send JSON
+// - res.redirect(url) — send redirect
+// - res.render(view, ...) — render template
+// - res.set/get(field) — manage headers
+```
+
+---
+
+## **Complete Request Flow Diagram**
+
+```
+HTTP Request
+    ↓
+app(req, res, next) — app is a function!
+    ↓
+app.handle(req, res, callback)
+    ├─ Set X-Powered-By header
+    ├─ Create req.res = res, res.req = req
+    ├─ Swap prototypes: inject Express methods
+    └─ router.handle(req, res, finalhandler)
+        ↓
+    Router iterates middleware in order:
+        ├─ Check middleware path matches
+        ├─ Call middleware(req, res, next)
+        │
+        ├─ If middleware sends response: STOP
+        │
+        ├─ If middleware calls next(): CONTINUE
+        │
+        ├─ If middleware calls next(err): SKIP to error handlers
+        │
+        ├─ If no matching middleware: skip
+        │
+        └─ (For route handlers) match HTTP method too
+    ↓
+If nothing sends response:
+    └─ finalhandler sends 404 or error
+```
+
+---
+
+## **Key Design Patterns**
+
+| Aspect | Pattern |
+|--------|---------|
+| **App as middleware** | App is literally `function(req, res, next)` |
+| **Prototype swapping** | `Object.setPrototypeOf()` dynamically adds methods |
+| **Lazy router** | Router instantiated on first use via getter |
+| **Sub-app mounting** | Wrapper middleware restores parent context |
+| **Error routing** | 4-arg middleware detected by arity, skips 3-arg handlers |
+| **Settings inheritance** | Child apps use parent's via prototype chain |
+| **Method chaining** | Most methods return `this` for fluent API |

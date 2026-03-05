@@ -6,40 +6,75 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 FIXTURES_GO="$REPO/testdata/fixtures/go"
 FIXTURES_PY="$REPO/testdata/fixtures/python"
 FIXTURES_TS="$REPO/testdata/fixtures/ts"
-BINARY="$REPO/lumen"
+FIXTURES_JAVA="$REPO/testdata/fixtures/java"
+FIXTURES_JS="$REPO/testdata/fixtures/js"
+FIXTURES_RUBY="$REPO/testdata/fixtures/ruby"
+FIXTURES_RUST="$REPO/testdata/fixtures/rust"
+FIXTURES_PHP="$REPO/testdata/fixtures/php"
+BINARY="$REPO/bin/lumen"
 
-# ── Questions (3 languages × 1 hard question each) ───────────────────────────
+# ── Questions (8 languages × 1 hard question each) ───────────────────────────
 QUESTIONS=(
-  # Go (Prometheus fixtures)
+  # Go (Prometheus TSDB fixtures)
   "How does TSDB compaction work end-to-end? Explain the Compactor interface, LeveledCompactor, and how the DB triggers compaction. Show relevant types, interfaces, and key method signatures."
-  # Python (Django + Flask fixtures)
+  # Python (Django fixtures)
   "How does the Django QuerySet evaluation and filtering pipeline work? Explain QuerySet chaining, lazy evaluation, the Query class, how lookups and filters are compiled into SQL, and how the Manager ties it all together. Show key classes and method signatures."
   # TypeScript (VSCode base library fixtures)
-  "How do async operations, cancellation, and resource lifecycle management work together? Explain CancelablePromise, CancellationToken, the async utilities (throttle, debounce, retry), how they integrate with the disposable lifecycle system, and how event-driven patterns compose with async flows. Show key interfaces and class relationships."
+  "How do Disposable and IDisposable work together with the EventEmitter system? Explain the lifecycle management pattern, how listeners are registered and cleaned up, and how events are typed and fired. Show key interfaces and class relationships."
+  # Java (Spring PetClinic fixtures)
+  "How is the PetClinic domain model structured? Explain the entity hierarchy (Owner, Pet, Visit, Vet), how JPA/Hibernate maps the relationships, and how the repository layer exposes data access. Show key classes, annotations, and method signatures."
+  # JavaScript (Express fixtures)
+  "How does Express handle the full request/response lifecycle? Explain middleware chaining, how the Router works, how error-handling middleware differs from regular middleware, and how app.use and route mounting compose. Show key function signatures and flow."
+  # Ruby (Rails fixtures)
+  "How does the Rails middleware stack work? Explain how Rack middleware is assembled, how ActionDispatch integrates, how requests flow through the stack, and how custom middleware is added. Show key classes, modules, and call signatures."
+  # Rust (ripgrep fixtures)
+  "How does ripgrep's search pipeline work end-to-end? Explain the searcher/matcher/sink architecture, how file walking is parallelized, how the Grep and Searcher types interact, and how results flow to the output layer. Show key traits, structs, and method signatures."
+  # PHP (Laravel fixtures)
+  "How does the Laravel service container resolve dependencies? Explain binding, contextual binding, automatic injection, how the container builds concrete classes, and how service providers register bindings. Show key classes, interfaces, and method signatures."
 )
 Q_SLUGS=(
-  "go-tsdb-compaction"
+  "go-registry-concurrency"
   "py-django-queryset"
-  "ts-async-lifecycle"
+  "ts-disposable-events"
+  "java-petclinic-domain"
+  "js-express-lifecycle"
+  "ruby-rails-middleware"
+  "rust-ripgrep-pipeline"
+  "php-laravel-container"
 )
 Q_LANG=(
   "go"
   "python"
   "typescript"
+  "java"
+  "javascript"
+  "ruby"
+  "rust"
+  "php"
 )
 Q_FIXTURES=(
   "$FIXTURES_GO"
   "$FIXTURES_PY"
   "$FIXTURES_TS"
+  "$FIXTURES_JAVA"
+  "$FIXTURES_JS"
+  "$FIXTURES_RUBY"
+  "$FIXTURES_RUST"
+  "$FIXTURES_PHP"
 )
 Q_DIFFICULTY=(
+  "hard"
+  "hard"
+  "hard"
+  "hard"
+  "hard"
   "hard"
   "hard"
   "hard"
 )
 
 # ── Models ────────────────────────────────────────────────────────────────────
-MODELS=("sonnet" "opus")
+MODELS=("haiku")
 FILTER_MODELS=()
 FILTER_QUESTIONS=()
 
@@ -85,13 +120,13 @@ done
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 echo "Building lumen..."
-CGO_ENABLED=1 go build -o lumen .
+make build-local
 
 # ── Index ─────────────────────────────────────────────────────────────────────
 echo "Indexing fixtures..."
-for fx_dir in "$FIXTURES_GO" "$FIXTURES_PY" "$FIXTURES_TS"; do
+for fx_dir in "$FIXTURES_GO" "$FIXTURES_PY" "$FIXTURES_TS" "$FIXTURES_JAVA" "$FIXTURES_JS" "$FIXTURES_RUBY" "$FIXTURES_RUST" "$FIXTURES_PHP"; do
   LUMEN_BACKEND="$EMBED_BACKEND" LUMEN_EMBED_MODEL="$EMBED_MODEL" \
-    ./lumen index "$fx_dir" 2>&1 | tail -1
+    bin/lumen index "$fx_dir" 2>&1 | tail -1
 done
 
 # ── MCP configs ───────────────────────────────────────────────────────────────
@@ -126,7 +161,7 @@ run() {
   local allowed_tools_arg=()
   [[ "$mcp_cfg" == "$MCP_ENABLED" ]] && allowed_tools_arg=(--allowedTools "mcp__lumen__semantic_search,mcp__lumen__index_status")
 
-  claude \
+  env -u CLAUDECODE claude \
     --output-format stream-json \
     --verbose \
     --model "$model" \
@@ -187,7 +222,7 @@ run_judge() {
   local have_answers=false
 
   for model in "${MODELS[@]}"; do
-    for scenario in baseline mcp-only mcp-full; do
+    for scenario in baseline solo together; do
       local af="$RESULTS_DIR/${slug}-${model}-${scenario}-answer.txt"
       local mf="$RESULTS_DIR/${slug}-${model}-${scenario}-metrics.json"
       if [[ -f "$af" ]]; then
@@ -218,7 +253,7 @@ $(cat "$af")
   printf "  Judging %-28s ... " "$slug"
 
   # Brief verdict for summary (content quality + efficiency)
-  claude -p --model claude-opus-4-6 --effort medium \
+  env -u CLAUDECODE claude -p --model claude-opus-4-6 --effort medium \
     "You are a judge evaluating AI answers to a codebase question. Be concise.
 
 Question: $question
@@ -239,11 +274,11 @@ One or two sentences comparing runtime, token usage, and cost across scenarios. 
 ## Verdict
 On the very last line write exactly: **Winner: model/scenario**
 Choose the single run that offers the best combination of answer quality, token usage, cost, and runtime. All three efficiency dimensions (tokens, cost, time) matter equally alongside quality.
-Example: **Winner: sonnet/mcp-only**" \
+Example: **Winner: sonnet/solo**" \
     > "$judge_brief_file" 2>&1 || echo "_Judge unavailable_" > "$judge_brief_file"
 
   # Detailed analysis for detail report
-  claude -p --model claude-opus-4-6 --effort medium \
+  env -u CLAUDECODE claude -p --model claude-opus-4-6 --effort medium \
     "You are a judge evaluating AI answers to a question about a codebase.
 
 Question: $question
@@ -275,7 +310,7 @@ emit_overall_stats() {
   echo "|-------|----------|------------|-----------------|------------------|------------------|"
 
   for model in "${MODELS[@]}"; do
-    for scenario in baseline mcp-only mcp-full; do
+    for scenario in baseline solo together; do
       local total_dur_ms=0 total_in=0 total_out=0 total_cost_scaled=0 count=0
       for q_idx in "${Q_INDICES[@]}"; do
         local mf="$RESULTS_DIR/${Q_SLUGS[$q_idx]}-${model}-${scenario}-metrics.json"
@@ -328,8 +363,8 @@ emit_overall_comparison() {
     if [[ -n "$winner_scenario" && "$winner" != "unknown" ]]; then
       case "$winner_scenario" in
         baseline) (( wins_baseline++ )) || true ;;
-        mcp-only) (( wins_mcp_only++ )) || true ;;
-        mcp-full) (( wins_mcp_full++ )) || true ;;
+        solo) (( wins_mcp_only++ )) || true ;;
+        together) (( wins_mcp_full++ )) || true ;;
       esac
     fi
 
@@ -337,7 +372,7 @@ emit_overall_comparison() {
     local runner_up="—"
     local best_cost_scaled=999999999
     for model in "${MODELS[@]}"; do
-      for scenario in baseline mcp-only mcp-full; do
+      for scenario in baseline solo together; do
         local run_key="${model}/${scenario}"
         [[ "$run_key" == "$winner" ]] && continue
         local mf="$RESULTS_DIR/${slug}-${model}-${scenario}-metrics.json"
@@ -365,12 +400,12 @@ emit_overall_comparison() {
   local overall_winner_scenario=""
   local overall_winner_count=0
 
-  for scenario in baseline mcp-only mcp-full; do
+  for scenario in baseline solo together; do
     local wins
     case "$scenario" in
       baseline) wins=$wins_baseline ;;
-      mcp-only) wins=$wins_mcp_only ;;
-      mcp-full) wins=$wins_mcp_full ;;
+      solo) wins=$wins_mcp_only ;;
+      together) wins=$wins_mcp_full ;;
     esac
     echo "| $scenario | $wins |"
     if (( wins > overall_winner_count )); then
@@ -402,8 +437,8 @@ generate_reports() {
     echo "| Scenario | Description |"
     echo "|----------|-------------|"
     echo "| **baseline** | All default Claude tools, no MCP |"
-    echo "| **mcp-only** | \`semantic_search\` MCP tool only |"
-    echo "| **mcp-full** | All default tools + MCP |"
+    echo "| **solo** | \`semantic_search\` MCP tool only |"
+    echo "| **together** | All default tools + MCP |"
     echo ""
     emit_overall_stats
     echo "---"
@@ -429,7 +464,7 @@ generate_reports() {
       [[ -f "$judge_brief_file" ]] && winner=$(extract_winner "$judge_brief_file")
 
       for model in "${MODELS[@]}"; do
-        for scenario in baseline mcp-only mcp-full; do
+        for scenario in baseline solo together; do
           local metrics_file="$RESULTS_DIR/${slug}-${model}-${scenario}-metrics.json"
           if [[ -f "$metrics_file" ]]; then
             local in_tok cr_tok out_tok cost_usd dur_ms cost_fmt dur_s badge
@@ -493,7 +528,7 @@ generate_reports() {
       echo "|-------|----------|----------|-----------|------------|---------------|------------|------------|"
 
       for model in "${MODELS[@]}"; do
-        for scenario in baseline mcp-only mcp-full; do
+        for scenario in baseline solo together; do
           local metrics_file="$RESULTS_DIR/${slug}-${model}-${scenario}-metrics.json"
           if [[ -f "$metrics_file" ]]; then
             local in_tok cr_tok cc_tok out_tok cost_usd dur_ms cost_fmt dur_s
@@ -515,7 +550,7 @@ generate_reports() {
       echo ""
 
       for model in "${MODELS[@]}"; do
-        for scenario in baseline mcp-only mcp-full; do
+        for scenario in baseline solo together; do
           local af="$RESULTS_DIR/${slug}-${model}-${scenario}-answer.txt"
           if [[ -f "$af" ]]; then
             echo "### Answer: \`$model\` / \`$scenario\`"
@@ -552,8 +587,8 @@ for model in "${MODELS[@]}"; do
   for q_idx in "${Q_INDICES[@]}"; do
     _t1=$(mktemp) _t2=$(mktemp) _t3=$(mktemp)
     run "$MCP_EMPTY"   "$model" "$q_idx" "baseline" ""  >"$_t1" 2>&1 & _p1=$!
-    run "$MCP_ENABLED" "$model" "$q_idx" "mcp-only"  "1" >"$_t2" 2>&1 & _p2=$!
-    run "$MCP_ENABLED" "$model" "$q_idx" "mcp-full"  ""  >"$_t3" 2>&1 & _p3=$!
+    run "$MCP_ENABLED" "$model" "$q_idx" "solo"  "1" >"$_t2" 2>&1 & _p2=$!
+    run "$MCP_ENABLED" "$model" "$q_idx" "together"  ""  >"$_t3" 2>&1 & _p3=$!
     wait "$_p1" || true; cat "$_t1"; rm -f "$_t1"
     wait "$_p2" || true; cat "$_t2"; rm -f "$_t2"
     wait "$_p3" || true; cat "$_t3"; rm -f "$_t3"

@@ -1,0 +1,358 @@
+Based on ripgrep's source code in your fixtures directory, here's a comprehensive end-to-end explanation of the search pipeline:
+
+## High-Level Architecture
+
+Ripgrep's pipeline consists of three main phases:
+1. **File Walking** (parallel directory traversal)
+2. **Search Execution** (matcher finds patterns → searcher orchestrates → sink captures output)
+3. **Result Output** (printer formats and writes results)
+
+---
+
+## Core Components
+
+### 1. **Matcher/Searcher/Sink Architecture** (rg-search.rs:380-449)
+
+The pattern is a generic three-layer pipeline:
+
+```rust
+// Generic search functions that bind all three layers
+fn search_path<M: Matcher, W: WriteColor>(
+    matcher: M,
+    searcher: &mut grep::searcher::Searcher,
+    printer: &mut Printer<W>,
+    path: &Path,
+) -> io::Result<SearchResult> {
+    match *printer {
+        Printer::Standard(ref mut p) => {
+            let mut sink = p.sink_with_path(&matcher, path);  // Sink created
+            searcher.search_path(&matcher, path, &mut sink)?;  // Matcher + Searcher
+            Ok(SearchResult {
+                has_match: sink.has_match(),
+                stats: sink.stats().map(|s| s.clone()),
+            })
+        }
+        // ... other printer types
+    }
+}
+
+fn search_reader<M: Matcher, R: io::Read, W: WriteColor>(
+    matcher: M,
+    searcher: &mut grep::searcher::Searcher,
+    printer: &mut Printer<W>,
+    path: &Path,
+    mut rdr: R,
+) -> io::Result<SearchResult> {
+    // Same pattern, works with any Reader
+}
+```
+
+**Key insight**: The searcher calls `matcher.find_iter()` internally, feeding each match to the sink.
+
+---
+
+### 2. **Matcher Trait** (rg-matcher-lib.rs:546-1373)
+
+The abstraction for pattern finding:
+
+```rust
+pub trait Matcher {
+    type Captures: Captures;      // For regex groups
+    type Error: std::fmt::Display;
+
+    // Core method: find match after position `at`
+    fn find_at(
+        &self,
+        haystack: &[u8],
+        at: usize,
+    ) -> Result<Option<Match>, Self::Error>;
+
+    // Iterator over successive non-overlapping matches
+    fn find_iter<F>(
+        &self,
+        haystack: &[u8],
+        matched: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(Match) -> bool;
+    
+    fn find_iter_at<F>(
+        &self,
+        haystack: &[u8],
+        at: usize,
+        matched: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(Match) -> bool;
+
+    // Capture groups support
+    fn captures(
+        &self,
+        haystack: &[u8],
+        caps: &mut Self::Captures,
+    ) -> Result<bool, Self::Error>;
+
+    fn captures_iter<F>(
+        &self,
+        haystack: &[u8],
+        caps: &mut Self::Captures,
+        matched: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(&Self::Captures) -> bool;
+
+    fn captures_iter_at<F>(
+        &self,
+        haystack: &[u8],
+        at: usize,
+        caps: &mut Self::Captures,
+        mut matched: F,
+    ) -> Result<(), Self::Error>
+    where
+        F: FnMut(&Self::Captures) -> bool;
+
+    // Line-oriented optimizations
+    fn find_candidate_line(
+        &self,
+        haystack: &[u8],
+    ) -> Result<Option<LineMatchKind>, Self::Error>;
+
+    fn line_terminator(&self) -> Option<LineTerminator>;
+}
+
+pub struct Match {
+    start: usize,
+    end: usize,
+}
+```
+
+**Implementation via PatternMatcher enum** (rg-search.rs:193-197):
+```rust
+pub(crate) enum PatternMatcher {
+    RustRegex(grep::regex::RegexMatcher),
+    #[cfg(feature = "pcre2")]
+    PCRE2(grep::pcre2::RegexMatcher),
+}
+```
+
+---
+
+### 3. **Searcher Type** (rg-search.rs:230-241)
+
+Orchestrates the search and delegates to matcher/sink:
+
+```rust
+pub(crate) struct SearchWorker<W> {
+    config: Config,
+    command_builder: grep::cli::CommandReaderBuilder,
+    decomp_builder: Option<grep::cli::DecompressionReaderBuilder>,
+    matcher: PatternMatcher,
+    searcher: grep::searcher::Searcher,  // The orchestrator
+    printer: Printer<W>,
+}
+```
+
+The `grep::searcher::Searcher` type:
+- Reads file content line-by-line
+- Calls `matcher.find_iter()` to locate matches
+- Feeds each match to the sink
+- Handles binary detection, line terminators, multi-line matches
+
+**Search methods** (rg-search.rs:245-267):
+```rust
+pub(crate) fn search(&mut self, haystack: &Haystack) -> io::Result<SearchResult> {
+    self.searcher.set_binary_detection(bin);
+    if haystack.is_stdin() {
+        self.search_reader(path, &mut io::stdin().lock())
+    } else if self.should_preprocess(path) {
+        self.search_preprocessor(path)
+    } else if self.should_decompress(path) {
+        self.search_decompress(path)
+    } else {
+        self.search_path(path)
+    }
+}
+```
+
+---
+
+### 4. **Printer/Sink Architecture** (rg-search.rs:203-211)
+
+The output layer abstracts formatting:
+
+```rust
+pub(crate) enum Printer<W> {
+    Standard(grep::printer::Standard<W>),
+    Summary(grep::printer::Summary<W>),
+    JSON(grep::printer::JSON<W>),
+}
+```
+
+Each printer implements:
+```rust
+fn sink_with_path<'a, M: Matcher>(
+    &'a mut self,
+    matcher: &'a M,
+    path: &'a Path,
+) -> Box<dyn Sink + 'a>
+```
+
+**Sink trait** (implied, not directly shown):
+- Receives matches via callbacks from searcher
+- Buffers/formats output based on printer type
+- Provides `has_match()`, `stats()` methods
+- Implements stats collection (line count, byte count, etc.)
+
+---
+
+## Parallelization: File Walking (rg-main.rs:160-208)
+
+**Sequential search**:
+```rust
+fn search(args: &HiArgs, mode: SearchMode) -> anyhow::Result<bool> {
+    let haystack_builder = args.haystack_builder();
+    let unsorted = args
+        .walk_builder()?
+        .build()  // Single-threaded iterator
+        .filter_map(|result| haystack_builder.build_from_result(result));
+    let haystacks = args.sort(unsorted);
+
+    for haystack in haystacks {
+        let search_result = match searcher.search(&haystack) {
+            Ok(search_result) => search_result,
+            Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => break,
+            Err(err) => { /* log and continue */ }
+        };
+        matched = matched || search_result.has_match();
+    }
+}
+```
+
+**Parallel search** (thread-per-directory):
+```rust
+fn search_parallel(args: &HiArgs, mode: SearchMode) -> anyhow::Result<bool> {
+    let bufwtr = args.buffer_writer();  // Thread-safe output buffer
+    let stats = args.stats().map(std::sync::Mutex::new);
+    let matched = AtomicBool::new(false);
+    let searched = AtomicBool::new(false);
+
+    let mut searcher = args.search_worker(
+        args.matcher()?,
+        args.searcher()?,
+        args.printer(mode, bufwtr.buffer()),
+    )?;
+    
+    // Walker spawns worker threads per directory
+    args.walk_builder()?.build_parallel().run(|| {
+        let bufwtr = &bufwtr;
+        let stats = &stats;
+        let matched = &matched;
+        let searched = &searched;
+        let mut searcher = searcher.clone();  // Each thread gets its own copy
+
+        Box::new(move |result| {
+            let haystack = match haystack_builder.build_from_result(result) {
+                Some(haystack) => haystack,
+                None => return WalkState::Continue,
+            };
+            searched.store(true, Ordering::SeqCst);
+            searcher.printer().get_mut().clear();
+            
+            let search_result = match searcher.search(&haystack) {
+                Ok(search_result) => search_result,
+                Err(err) => { /* log */ return WalkState::Continue; }
+            };
+            
+            if search_result.has_match() {
+                matched.store(true, Ordering::SeqCst);
+            }
+            
+            if let Some(ref locked_stats) = *stats {
+                let mut stats = locked_stats.lock().unwrap();
+                *stats += search_result.stats().unwrap();  // Safe aggregation
+            }
+            
+            // Print buffer to stdout (thread-safe batching)
+            if let Err(err) = bufwtr.print(searcher.printer().get_mut()) {
+                if err.kind() == std::io::ErrorKind::BrokenPipe {
+                    return WalkState::Quit;
+                }
+            }
+            
+            if matched.load(Ordering::SeqCst) && args.quit_after_match() {
+                WalkState::Quit
+            } else {
+                WalkState::Continue
+            }
+        })
+    });
+}
+```
+
+**Synchronization primitives**:
+- `AtomicBool` for lock-free state (matched, searched)
+- `Mutex<Stats>` for aggregating statistics
+- `BufferWriter` for atomic output batches (prevents interleaved line corruption)
+- `ignore` crate's `WalkParallel` manages the thread pool
+
+---
+
+## Results Flow Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ walk_builder().build_parallel()                             │
+│ (Creates thread pool, iterates directories)                 │
+└────────────────┬────────────────────────────────────────────┘
+                 │
+    ┌────────────▼─────────────────────┐
+    │ Each worker thread gets:          │
+    │ - SearchWorker (cloned)           │
+    │ - HaystackBuilder                 │
+    │ - BufferWriter (shared)           │
+    │ - Atomic state (shared)           │
+    └────────────┬─────────────────────┘
+                 │
+    ┌────────────▼──────────────────────────────────┐
+    │ searcher.search(&haystack)                     │
+    │ ├─ Opens file / gets reader                    │
+    │ └─ Calls search_reader/search_path             │
+    └────────────┬──────────────────────────────────┘
+                 │
+    ┌────────────▼──────────────────────────────────┐
+    │ Matcher.find_iter(file_content, |match| {...})│
+    │ ├─ Locates pattern matches                     │
+    │ └─ Calls closure for each match                │
+    └────────────┬──────────────────────────────────┘
+                 │
+    ┌────────────▼──────────────────────────────────┐
+    │ Sink.write(line, match)                        │
+    │ ├─ Formats match (color, JSON, summary)       │
+    │ └─ Buffers in printer's buffer                 │
+    └────────────┬──────────────────────────────────┘
+                 │
+    ┌────────────▼──────────────────────────────────┐
+    │ bufwtr.print(printer_buffer)                   │
+    │ └─ Atomic write to stdout (entire buffer)     │
+    └──────────────────────────────────────────────┘
+```
+
+---
+
+## Key Design Patterns
+
+| Component | Pattern | Purpose |
+|-----------|---------|---------|
+| **Matcher** | Trait polymorphism | Swap regex engines (Rust/PCRE2) |
+| **Sink** | Dynamic trait object | Format output without conditional compilation |
+| **Searcher** | Orchestrator | Decouples file I/O, line parsing, matching, output |
+| **BufferWriter** | Thread-safe buffer | Atomic output per thread (prevents garbled lines) |
+| **WalkParallel** | Work-stealing thread pool | Efficient directory traversal (external `ignore` crate) |
+| **Atomic state** | Lock-free sharing | Matches/searched flags without contention |
+
+This architecture achieves **high performance** through:
+- **Lazy I/O**: Reads files only as needed
+- **Line-oriented**: Processes by line for cache locality
+- **Parallelization at file-level**: No fine-grained locking during search
+- **Pluggable matchers**: Test different regex engines
+- **Batched output**: Prevents thread contention on stdout

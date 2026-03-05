@@ -306,6 +306,11 @@ func (ic *indexerCache) handleSemanticSearch(ctx context.Context, req *mcp.CallT
 
 func validateSearchInput(input *SemanticSearchInput) error {
 	if input.Cwd != "" {
+		if strings.HasPrefix(input.Cwd, "~/") {
+			if home, err := os.UserHomeDir(); err == nil {
+				input.Cwd = filepath.Join(home, input.Cwd[2:])
+			}
+		}
 		input.Cwd = filepath.Clean(input.Cwd)
 		if !filepath.IsAbs(input.Cwd) {
 			return fmt.Errorf("cwd must be an absolute path")

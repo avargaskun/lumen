@@ -78,6 +78,21 @@ func chunkGenDecl(fset *token.FileSet, filePath string, content []byte, d *ast.G
 		return nil
 	}
 
+	// Emit grouped const/var blocks as a single chunk when there are multiple specs.
+	if len(d.Specs) > 1 {
+		if _, isValue := d.Specs[0].(*ast.ValueSpec); isValue {
+			kind := "var"
+			if d.Tok == token.CONST {
+				kind = "const"
+			}
+			symbol := d.Specs[0].(*ast.ValueSpec).Names[0].Name
+			start, end := declRange(fset, d.Doc, d.Pos(), d.End())
+			chunks = append(chunks, makeChunk(filePath, symbol, kind, start.Line, end.Line,
+				sliceContent(content, start.Offset, end.Offset)))
+			return chunks
+		}
+	}
+
 	for _, spec := range d.Specs {
 		switch s := spec.(type) {
 		case *ast.TypeSpec:

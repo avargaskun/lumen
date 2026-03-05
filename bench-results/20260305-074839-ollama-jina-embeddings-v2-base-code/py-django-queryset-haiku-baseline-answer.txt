@@ -1,0 +1,323 @@
+Based on the Django source code in the testdata fixtures, here's a comprehensive explanation of the QuerySet evaluation and filtering pipeline:
+
+## Django QuerySet Pipeline Architecture
+
+### 1. **QuerySet Chaining & Lazy Evaluation**
+
+```python
+# QuerySet.__init__ — Creates the lazy promise
+class QuerySet(AltersData):
+    def __init__(self, model=None, query=None, using=None, hints=None):
+        self.model = model
+        self._db = using
+        self._query = query or sql.Query(self.model)  # Deferred Query object
+        self._result_cache = None  # Cache populated only on evaluation
+        self._sticky_filter = False
+        self._prefetch_related_lookups = ()
+```
+
+**Key principle**: QuerySets don't execute SQL immediately. Operations return cloned QuerySets that accumulate filter conditions in `self._query`.
+
+### 2. **The Clone Pattern (Copy-on-Write)**
+
+```python
+def _chain(self):
+    """Return a copy for the next operation."""
+    obj = self._clone()
+    if obj._sticky_filter:
+        obj.query.filter_is_sticky = True
+    return obj
+
+def _clone(self):
+    """Lightweight copy of QuerySet (NOT a deep copy)."""
+    c = self.__class__(
+        model=self.model,
+        query=self.query.chain(),  # Clones the underlying Query object
+        using=self._db,
+        hints=self._hints,
+    )
+    c._prefetch_related_lookups = self._prefetch_related_lookups[:]
+    c._iterable_class = self._iterable_class
+    c._fields = self._fields
+    return c
+```
+
+Each method returns a new QuerySet with a **cloned Query** object, preserving immutability:
+- Original: `Article.objects.all().filter(published=True)`
+- Each method: `filter()`, `exclude()`, `order_by()` → new QuerySet
+
+### 3. **Filter/Exclude & The Q Object**
+
+```python
+# User code:
+qs = Article.objects.filter(status='published', author__name='Alice')
+
+# Implementation:
+def filter(self, *args, **kwargs):
+    """AND the filters together."""
+    return self._filter_or_exclude(False, args, kwargs)
+
+def exclude(self, *args, **kwargs):
+    """AND the negated filters."""
+    return self._filter_or_exclude(True, args, kwargs)
+
+def _filter_or_exclude_inplace(self, negate, args, kwargs):
+    if negate:
+        self._query.add_q(~Q(*args, **kwargs))  # NOT
+    else:
+        self._query.add_q(Q(*args, **kwargs))   # AND
+```
+
+**Q Object** (logical expression tree):
+```python
+class Q:
+    def __init__(self, *args, _connector=None, _negated=False, **kwargs):
+        self.children = list(args) + sorted(kwargs.items())
+        self.connector = _connector or self.AND
+        self.negated = _negated
+
+    def __and__(self, other):
+        return self._combine(other, self.AND)
+    
+    def __or__(self, other):
+        return self._combine(other, self.OR)
+
+    def __invert__(self):
+        obj = self.copy()
+        obj.negated = not self.negated
+        return obj
+    
+    def resolve_expression(self, query, allow_joins=True, **kwargs):
+        """Convert Q tree into a WhereNode for SQL compilation."""
+        clause, joins = query._add_q(self, ...)
+        return clause
+```
+
+**Chaining example**:
+```python
+Q(status='published') & Q(author__name='Alice')
+→ Q object with connector=AND, children=[('status', 'published'), ('author__name', 'Alice')]
+```
+
+### 4. **The Query Class (SQL Structure)**
+
+```python
+class SQLQuery:
+    """Internal SQL representation."""
+    
+    def __init__(self, model=None, where=None, alias_map=None):
+        self.model = model
+        self.where = where or WhereNode()  # WHERE clause tree
+        self.alias_map = alias_map or {}   # Table aliases for joins
+        self.tables = []                    # Tables in FROM clause
+        self.select = []                    # Columns in SELECT
+        self.order_by = []
+        self.distinct = False
+        self.select_related = False
+        self._annotations = {}              # Aggregations (COUNT, SUM, etc.)
+    
+    def add_filter(self, filter_lhs, filter_rhs, connector="AND", negate=False):
+        """Build WhereNode from field lookups."""
+        clause = self._build_lookup(filter_lhs, filter_rhs)
+        if negate:
+            clause.negate()
+        self.where.add(clause, connector)
+    
+    def clone(self):
+        """Deep copy for chaining."""
+        obj = self.__class__(model=self.model)
+        obj.where = self.where.clone()
+        obj.alias_map = self.alias_map.copy()
+        return obj
+```
+
+**WhereNode** (SQL WHERE tree):
+```python
+class WhereNode:
+    """Represents WHERE conditions as a tree."""
+    default_connector = "AND"
+    
+    def __init__(self, children=None, connector=None, negated=False):
+        self.children = children or []
+        self.connector = connector or self.default_connector
+        self.negated = negated
+    
+    def add(self, node, connector):
+        """Merge nodes, respecting connector priorities."""
+        if self.connector == connector:
+            self.children.append(node)  # Flatten: (a AND b) AND c → [a, b, c]
+        else:
+            # Wrap: (a AND b) OR c → [[a, b] AND_connector, c]
+            new_node = WhereNode(
+                children=self.children[:], 
+                connector=self.connector
+            )
+            self.children = [new_node, node]
+            self.connector = connector
+```
+
+### 5. **Lookup Compilation (Field → SQL)**
+
+When `.filter(author__name='Alice')` is called:
+
+```
+author__name → Lookup traversal
+  ↓
+Article._meta.get_field('author')  # ForeignKey
+  ↓
+Follow reverse relation to User model
+  ↓
+User._meta.get_field('name')  # CharField
+  ↓
+Build WhereNode:
+  Column: user.name
+  Operator: = (iexact, icontains, etc. all supported via lookup system)
+  Value: 'Alice'
+  ↓
+Generate SQL: WHERE user.name = 'Alice' AND article.status = 'published'
+```
+
+### 6. **Execution: Lazy → Eager**
+
+Evaluation happens only on iteration:
+
+```python
+def _fetch_all(self):
+    """Triggered by iteration, len(), bool(), etc."""
+    if self._result_cache is None:
+        self._result_cache = list(self._iterable_class(self))
+    if self._prefetch_related_lookups and not self._prefetch_done:
+        self._prefetch_related_objects()
+
+def __iter__(self):
+    self._fetch_all()
+    return iter(self._result_cache)
+
+def __len__(self):
+    self._fetch_all()
+    return len(self._result_cache)
+```
+
+**The execution pipeline**:
+1. **Compiler** (`SQLQuery.get_compiler()`) → converts Query to SQL string
+2. **execute_sql()** → database cursor, fetches rows in chunks (100 at a time)
+3. **results_iter()** → converts database tuples to Python values
+4. **ModelIterable** → converts rows into model instances
+
+```python
+class ModelIterable(BaseIterable):
+    def __iter__(self):
+        compiler = queryset.query.get_compiler(using=db)
+        results = compiler.execute_sql(chunked_fetch=True)
+        
+        for row in compiler.results_iter(results):
+            obj = model_cls.from_db(db, init_list, row_values)
+            # Populate related objects from select_related()
+            for rel_populator in related_populators:
+                rel_populator.populate(row, obj)
+            yield obj
+```
+
+### 7. **Manager → QuerySet Bridge**
+
+```python
+class BaseManager:
+    """Entry point for model queries."""
+    
+    def get_queryset(self):
+        """Return a fresh QuerySet."""
+        return self._queryset_class(
+            model=self.model, 
+            using=self._db, 
+            hints=self._hints
+        )
+    
+    def all(self):
+        return self.get_queryset()
+    
+    @classmethod
+    def _get_queryset_methods(cls, queryset_class):
+        """Auto-proxy QuerySet methods to Manager."""
+        for name, method in inspect.getmembers(queryset_class):
+            def manager_method(self, *args, **kwargs):
+                return getattr(self.get_queryset(), name)(*args, **kwargs)
+            new_methods[name] = manager_method
+        return new_methods
+
+# Concrete implementation
+class Manager(BaseManager.from_queryset(QuerySet)):
+    pass
+```
+
+**Usage**:
+```python
+Article.objects.filter(status='published')
+         ↓
+Manager.get_queryset() → QuerySet(model=Article)
+         ↓
+QuerySet.filter() → new QuerySet with WHERE clause added
+         ↓
+Iteration/len/bool → Execution
+```
+
+### 8. **Complete Example: How Chaining Works**
+
+```python
+# User code
+qs = Article.objects.all()
+     .filter(status='published')
+     .exclude(author__banned=True)
+     .order_by('-created')
+     .select_related('author')
+     .values_list('id', 'title')
+
+# Step-by-step execution:
+
+# Step 1: objects.all()
+# Returns: QuerySet(model=Article, query=Query(model=Article))
+
+# Step 2: .filter(status='published')
+# _chain() clones QuerySet → new Query
+# _filter_or_exclude_inplace adds: WHERE status='published'
+# Returns: new QuerySet with updated WHERE
+
+# Step 3: .exclude(author__banned=True)
+# _chain() clones QuerySet → new Query (still has WHERE status)
+# _filter_or_exclude_inplace adds: NOT (author.banned=True)
+# WHERE becomes: status='published' AND NOT author.banned
+
+# Step 4: .order_by('-created')
+# _chain() clones QuerySet
+# Sets: Query.order_by = ['-created']
+
+# Step 5: .select_related('author')
+# _chain() clones QuerySet
+# Sets: Query.select_related = True
+# Adds JOIN article_author clause
+
+# Step 6: .values_list('id', 'title')
+# _chain() clones QuerySet
+# Changes _iterable_class to ValuesListIterable
+# Sets: Query.values_select = ('id', 'title')
+
+# Step 7: Iteration/len/bool
+# _fetch_all() triggered
+# Compiler generates SQL:
+#   SELECT article.id, article.title 
+#   FROM article 
+#   JOIN user ON article.author_id = user.id
+#   WHERE article.status='published' AND user.banned != True
+#   ORDER BY article.created DESC
+# ValuesListIterable returns tuples instead of model objects
+```
+
+### Key Takeaways
+
+| Concept | Implementation |
+|---------|---|
+| **Lazy Evaluation** | QuerySet stores Query object, SQL only generated on iteration |
+| **Immutability** | Each method clones QuerySet + Query, original unchanged |
+| **Query Building** | Filters accumulated as Q objects → WhereNode tree |
+| **Lookup Resolution** | Field traversal (`author__name`) → JOIN generation |
+| **Compilation** | Query → SQL via dialect-specific Compiler |
+| **Manager Role** | Proxies methods to QuerySet, provides `.get_queryset()` entry point |

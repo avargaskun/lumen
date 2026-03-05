@@ -1,0 +1,270 @@
+# Disposable, IDisposable, and EventEmitter Lifecycle Pattern
+
+This is a sophisticated resource management and event system used throughout Microsoft's VS Code. Here's how they work together:
+
+## Core Interfaces & Classes
+
+### IDisposable (lifecycle.ts:312-314)
+```typescript
+export interface IDisposable {
+	dispose(): void;
+}
+```
+Simple contract: any object with a cleanup method. Enables predictable resource cleanup.
+
+### Event Type (event.ts:37-39)
+```typescript
+export interface Event<T> {
+	(listener: (e: T) => unknown, thisArgs?: any, 
+	 disposables?: IDisposable[] | DisposableStore): IDisposable;
+}
+```
+An **event is a function** that registers listeners and returns a disposable to unsubscribe. Supports optional `thisArgs` binding and can add the subscription to a disposable collection.
+
+## Key Class Relationships
+
+```
+IDisposable (interface)
+    ↑
+    ├── FunctionDisposable
+    ├── Disposable (abstract base)
+    │   └── Used by: Emitter, AsyncEmitter, PauseableEmitter
+    ├── DisposableStore (collection manager)
+    ├── MutableDisposable (mutable value holder)
+    └── Emitter<T> (extends IDisposable via dispose method)
+```
+
+## Lifecycle Management Pattern
+
+### Disposable (Abstract Base) — lifecycle.ts:526-557
+```typescript
+export abstract class Disposable implements IDisposable {
+	static readonly None = Object.freeze<IDisposable>({ dispose() { } });
+	
+	protected readonly _store = new DisposableStore();
+	
+	constructor() {
+		trackDisposable(this);
+		setParentOfDisposable(this._store, this);
+	}
+	
+	public dispose(): void {
+		markAsDisposed(this);
+		this._store.dispose();
+	}
+	
+	protected _register<T extends IDisposable>(o: T): T {
+		return this._store.add(o);
+	}
+}
+```
+
+**Pattern**: Extend `Disposable`, use `_register()` to add child disposables, automatic cleanup on dispose.
+
+### DisposableStore (Collection Manager) — lifecycle.ts:416-519
+```typescript
+export class DisposableStore implements IDisposable {
+	private readonly _toDispose = new Set<IDisposable>();
+	private _isDisposed = false;
+	
+	public add<T extends IDisposable>(o: T): T {
+		setParentOfDisposable(o, this);
+		if (!this._isDisposed) {
+			this._toDispose.add(o);
+		} else {
+			// Already disposed, warn but dispose the new item
+			console.warn('Adding to disposed store!');
+		}
+		return o;
+	}
+	
+	public dispose(): void {
+		if (!this._isDisposed) {
+			markAsDisposed(this);
+			this._isDisposed = true;
+			this.clear();  // Disposes all items
+		}
+	}
+	
+	public deleteAndDispose<T extends IDisposable>(o: T): void {
+		this._toDispose.delete(o);
+		o.dispose();
+	}
+}
+```
+
+**Pattern**: Centralized collection for managing multiple disposables. Tracks parent-child relationships.
+
+## Listener Registration & Cleanup
+
+### Emitter Class — event.ts:1093-1339
+
+```typescript
+export class Emitter<T> {
+	private _listeners?: ListenerOrListeners<T>;  // Single listener or array
+	private _size = 0;
+	private readonly _options?: EmitterOptions;
+	
+	constructor(options?: EmitterOptions) {
+		this._options = options;
+		// Initialize leak detection monitors
+	}
+	
+	get event(): Event<T> {
+		return (callback, thisArgs, disposables) => {
+			// Register listener
+			const contained = new UniqueContainer(callback);
+			
+			if (!this._listeners) {
+				// First listener
+				this._options?.onWillAddFirstListener?.(this);
+				this._listeners = contained;
+				this._options?.onDidAddFirstListener?.(this);
+			} else if (this._listeners instanceof UniqueContainer) {
+				// Convert to array for multiple listeners
+				this._deliveryQueue ??= new EventDeliveryQueuePrivate();
+				this._listeners = [this._listeners, contained];
+			} else {
+				// Add to existing array
+				this._listeners.push(contained);
+			}
+			
+			this._size++;
+			
+			// Return disposable to remove listener
+			const result = toDisposable(() => {
+				this._removeListener(contained);
+			});
+			addToDisposables(result, disposables);
+			
+			return result;
+		};
+	}
+	
+	private _removeListener(listener: ListenerContainer<T>) {
+		this._options?.onWillRemoveListener?.(this);
+		
+		if (this._size === 1) {
+			this._listeners = undefined;
+			this._options?.onDidRemoveLastListener?.(this);
+			this._size = 0;
+		} else {
+			// Remove from array and compact if needed
+			const index = (this._listeners as any[]).indexOf(listener);
+			(this._listeners as any[])[index] = undefined;
+			this._size--;
+		}
+	}
+	
+	fire(event: T): void {
+		if (!this._listeners) return;
+		
+		if (this._listeners instanceof UniqueContainer) {
+			this._deliver(this._listeners, event);
+		} else {
+			// Deliver to array of listeners with queue management
+			const dq = this._deliveryQueue!;
+			dq.enqueue(this, event, this._listeners.length);
+			this._deliverQueue(dq);
+		}
+	}
+}
+```
+
+## Event Registration Lifecycle
+
+### Flow Diagram:
+
+```
+1. Create Emitter
+   ├─ constructor(options?: EmitterOptions)
+   └─ _listeners = undefined, _size = 0
+
+2. Subscribe to Event
+   ├─ emitter.event(listener)
+   ├─ onWillAddFirstListener() [if first]
+   ├─ Wrap listener in UniqueContainer
+   ├─ Store in _listeners (or array)
+   ├─ onDidAddFirstListener() [if first]
+   ├─ Return: toDisposable(() => _removeListener(container))
+   └─ optionally add to DisposableStore or array
+
+3. Fire Event
+   ├─ emitter.fire(data)
+   ├─ Iterate listeners
+   └─ Call each: listener(data)
+
+4. Unsubscribe
+   ├─ Dispose the returned IDisposable
+   ├─ Calls _removeListener(container)
+   ├─ Removes from _listeners array
+   ├─ onWillRemoveListener()
+   └─ onDidRemoveLastListener() [if last removed]
+
+5. Dispose Emitter
+   ├─ emitter.dispose()
+   ├─ Clear _listeners
+   ├─ onDidRemoveLastListener()
+   └─ Prevent new listeners
+```
+
+## EmitterOptions Lifecycle Hooks — event.ts:858-899
+
+```typescript
+export interface EmitterOptions {
+	onWillAddFirstListener?: Function;      // Before first listener
+	onDidAddFirstListener?: Function;       // After first listener added
+	onDidAddListener?: Function;            // After any listener added
+	onWillRemoveListener?: Function;        // Before removing a listener
+	onDidRemoveLastListener?: Function;     // After last listener removed
+	onListenerError?: (e: any) => void;     // Error handler for listener exceptions
+	leakWarningThreshold?: number;          // Warn if too many listeners
+	deliveryQueue?: EventDeliveryQueue;     // Shared queue for order guarantees
+}
+```
+
+## Real-World Example Pattern
+
+```typescript
+class Document extends Disposable {
+	private readonly _onDidChange = new Emitter<string>();
+	public readonly onDidChange: Event<string> = this._onDidChange.event;
+	
+	constructor() {
+		super();
+		// Register emitter for cleanup
+		this._register(this._onDidChange);
+	}
+	
+	private _doEdit(content: string) {
+		// ... modify content ...
+		this._onDidChange.fire(content);
+	}
+}
+
+// Usage
+const doc = new Document();
+const store = new DisposableStore();
+
+// Subscribe - listener disposal is managed by store
+store.add(doc.onDidChange(content => {
+	console.log('Changed:', content);
+}));
+
+// Later: cleanup everything
+store.dispose();  // Removes all listeners + disposes doc
+```
+
+## Key Design Features
+
+| Feature | Purpose |
+|---------|---------|
+| **Single listener optimization** | Store single listener directly (not in array) to avoid allocation overhead |
+| **Sparse array compaction** | When listeners are removed, array stays sparse until >50% empty |
+| **Parent-child tracking** | `setParentOfDisposable()` tracks hierarchies for leak detection |
+| **Lifecycle hooks** | `onWillAddFirstListener`, `onDidRemoveLastListener` enable lazy subscription patterns |
+| **Leak detection** | `LeakageMonitor` warns when listener count exceeds thresholds |
+| **Delivery queue** | Shared queue prevents listener reentry issues during event delivery |
+| **Error isolation** | Listener exceptions don't break other listeners; logged via `onListenerError` |
+
+This architecture ensures memory safety through explicit disposal, enables efficient event handling with lazy patterns, and provides comprehensive leak detection for debugging.

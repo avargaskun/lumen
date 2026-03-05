@@ -54,15 +54,17 @@ func DefaultLanguages(maxChunkTokens int) map[string]Chunker {
 	py := mustTreeSitterChunker(LanguageDef{
 		Language: sitter_py.GetLanguage(),
 		Queries: []QueryDef{
-			{Pattern: `(function_definition name: (identifier) @name) @decl`, Kind: "function"},
+			{Pattern: `(module (function_definition name: (identifier) @name) @decl)`, Kind: "function"},
 			{Pattern: `(class_definition name: (identifier) @name) @decl`, Kind: "type"},
+			{Pattern: `(class_definition body: (block (function_definition name: (identifier) @name) @decl))`, Kind: "method"},
+			{Pattern: `(decorated_definition (decorator) definition: (function_definition name: (identifier) @name) @decl)`, Kind: "function"},
 		},
 	})
 
 	ts := mustTreeSitterChunker(LanguageDef{
 		Language: sitter_ts.GetLanguage(),
 		Queries: []QueryDef{
-			{Pattern: `(function_declaration name: (identifier) @name) @decl`, Kind: "function"},
+			{Pattern: `(function_declaration name: (identifier) @name body: (statement_block)) @decl`, Kind: "function"},
 			{Pattern: `(class_declaration name: (type_identifier) @name) @decl`, Kind: "type"},
 			{Pattern: `(abstract_class_declaration name: (type_identifier) @name) @decl`, Kind: "type"},
 			{Pattern: `(interface_declaration name: (type_identifier) @name) @decl`, Kind: "interface"},
@@ -74,7 +76,7 @@ func DefaultLanguages(maxChunkTokens int) map[string]Chunker {
 	tsx := mustTreeSitterChunker(LanguageDef{
 		Language: sitter_tsx.GetLanguage(),
 		Queries: []QueryDef{
-			{Pattern: `(function_declaration name: (identifier) @name) @decl`, Kind: "function"},
+			{Pattern: `(function_declaration name: (identifier) @name body: (statement_block)) @decl`, Kind: "function"},
 			{Pattern: `(class_declaration name: (type_identifier) @name) @decl`, Kind: "type"},
 			{Pattern: `(abstract_class_declaration name: (type_identifier) @name) @decl`, Kind: "type"},
 			{Pattern: `(interface_declaration name: (type_identifier) @name) @decl`, Kind: "interface"},
@@ -90,6 +92,20 @@ func DefaultLanguages(maxChunkTokens int) map[string]Chunker {
 			{Pattern: `(class_declaration name: (identifier) @name) @decl`, Kind: "type"},
 			{Pattern: `(method_definition name: (property_identifier) @name) @decl`, Kind: "method"},
 			{Pattern: `(generator_function_declaration name: (identifier) @name) @decl`, Kind: "function"},
+			{Pattern: `(expression_statement (assignment_expression
+  left: (member_expression property: (property_identifier) @name)
+  right: [(function_expression) (arrow_function)])) @decl`, Kind: "method"},
+			{Pattern: `(expression_statement (assignment_expression
+  left: (member_expression
+    object: (member_expression property: (property_identifier))
+    property: (property_identifier) @name)
+  right: (function_expression))) @decl`, Kind: "method"},
+			{Pattern: `(lexical_declaration (variable_declarator
+  name: (identifier) @name
+  value: [(function_expression) (arrow_function)])) @decl`, Kind: "function"},
+			{Pattern: `(variable_declaration (variable_declarator
+  name: (identifier) @name
+  value: [(function_expression) (arrow_function)])) @decl`, Kind: "function"},
 		},
 	})
 
@@ -150,6 +166,7 @@ func DefaultLanguages(maxChunkTokens int) map[string]Chunker {
 		Language: sitter_php.GetLanguage(),
 		Queries: []QueryDef{
 			{Pattern: `(function_definition name: (name) @name) @decl`, Kind: "function"},
+			{Pattern: `(class_declaration name: (name) @name) @decl`, Kind: "type"},
 			{Pattern: `(interface_declaration name: (name) @name) @decl`, Kind: "interface"},
 			{Pattern: `(trait_declaration name: (name) @name) @decl`, Kind: "type"},
 			{Pattern: `(method_declaration name: (name) @name) @decl`, Kind: "method"},
