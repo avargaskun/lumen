@@ -36,7 +36,7 @@ func LoadFromDir(dir string) (*Registry, error) {
 			return nil, fmt.Errorf("parse task file %s: %w", entry.Name(), err)
 		}
 
-		if err := validateTask(t); err != nil {
+		if err := validateTask(&t); err != nil {
 			return nil, fmt.Errorf("invalid task %s: %w", entry.Name(), err)
 		}
 
@@ -81,7 +81,7 @@ func (r *Registry) Count() int {
 	return len(r.tasks)
 }
 
-func validateTask(t Task) error {
+func validateTask(t *Task) error {
 	if t.ID == "" {
 		return fmt.Errorf("missing id")
 	}

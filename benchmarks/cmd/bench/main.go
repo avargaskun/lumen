@@ -33,7 +33,6 @@ var (
 	runScenario     string
 	runTask         string
 	runModel        string
-	runParallel     int
 	runLumenBinary  string
 	runEmbedModel   string
 	runEmbedBackend string
@@ -56,7 +55,6 @@ func init() {
 	runCmd.Flags().StringVar(&runScenario, "scenario", "all", "Scenario: baseline, mcp-only, mcp-full, or all")
 	runCmd.Flags().StringVar(&runTask, "task", "", "Run a single task by ID")
 	runCmd.Flags().StringVar(&runModel, "model", "claude-sonnet-4-6", "Claude model to use")
-	runCmd.Flags().IntVar(&runParallel, "parallel", 1, "Concurrent task runs")
 	runCmd.Flags().StringVar(&runLumenBinary, "lumen-binary", "./lumen", "Path to lumen binary")
 	runCmd.Flags().StringVar(&runEmbedModel, "embed-model", "ordis/jina-embeddings-v2-base-code", "Embedding model")
 	runCmd.Flags().StringVar(&runEmbedBackend, "embed-backend", "ollama", "Embedding backend (ollama or lmstudio)")
@@ -121,6 +119,15 @@ func runBenchmark(cmd *cobra.Command, _ []string) error {
 	for _, task := range taskList {
 		for _, scenario := range scenarios {
 			completed++
+
+			// Resume support: skip tasks that already have result files.
+			slug := fmt.Sprintf("%s-%s", task.ID, scenario)
+			resultPath := filepath.Join(outputDir, slug+"-result.json")
+			if _, err := os.Stat(resultPath); err == nil {
+				fmt.Printf("[%d/%d] %s / %s ... SKIP (result exists)\n", completed, total, task.ID, scenario)
+				continue
+			}
+
 			fmt.Printf("[%d/%d] %s / %s ... ", completed, total, task.ID, scenario)
 
 			result, err := harness.RunTask(ctx, task, scenario, opts)

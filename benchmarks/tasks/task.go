@@ -12,6 +12,7 @@ type Task struct {
 	Category         string     `json:"category"`
 	Validation       Validation `json:"validation"`
 	ExpectedFiles    []string   `json:"expected_files_changed,omitempty"`
+	SetupCommands    []string   `json:"setup_commands,omitempty"`
 	MaxBudgetUSD     float64    `json:"max_budget_usd"`
 	MaxTurns         int        `json:"max_turns"`
 }

@@ -25,6 +25,7 @@ type RunOpts struct {
 // RunResult holds the complete outcome of running a single task in one scenario.
 type RunResult struct {
 	TaskID     string           `json:"task_id"`
+	Category   string           `json:"category,omitempty"`
 	Scenario   tasks.Scenario   `json:"scenario"`
 	Metrics    RunMetrics       `json:"metrics"`
 	Validation ValidationResult `json:"validation"`
@@ -48,6 +49,7 @@ type mcpServer struct {
 func RunTask(ctx context.Context, task tasks.Task, scenario tasks.Scenario, opts RunOpts) (*RunResult, error) {
 	result := &RunResult{
 		TaskID:    task.ID,
+		Category:  task.Category,
 		Scenario:  scenario,
 		StartedAt: time.Now(),
 	}
@@ -63,6 +65,18 @@ func RunTask(ctx context.Context, task tasks.Task, scenario tasks.Scenario, opts
 		return result, err
 	}
 	defer cleanup()
+
+	// Run setup commands (e.g., pip install -e .).
+	for _, setupCmd := range task.SetupCommands {
+		c := exec.CommandContext(ctx, "sh", "-c", setupCmd)
+		c.Dir = workDir
+		c.Stdout = os.Stderr
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			result.Error = fmt.Sprintf("setup command %q: %v", setupCmd, err)
+			return result, err
+		}
+	}
 
 	// Pre-index if Lumen is involved.
 	if scenario != tasks.ScenarioBaseline {

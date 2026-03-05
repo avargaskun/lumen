@@ -35,54 +35,89 @@ type hfResponse struct {
 	} `json:"rows"`
 }
 
+const hfPageSize = 100
+
 // FetchSWEBenchLite downloads SWE-bench Lite tasks from HuggingFace and writes
-// them as individual JSON files to outputDir.
+// them as individual JSON files to outputDir. Paginates through the API since
+// the datasets-server caps responses at 100 rows.
 func FetchSWEBenchLite(outputDir string, count int) (int, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return 0, fmt.Errorf("create output dir: %w", err)
 	}
 
+	written := 0
+	offset := 0
+
+	for written < count {
+		length := hfPageSize
+		if remaining := count - written; remaining < length {
+			length = remaining
+		}
+
+		rows, err := fetchHFPage(offset, length)
+		if err != nil {
+			return written, err
+		}
+
+		if len(rows) == 0 {
+			break
+		}
+
+		for _, row := range rows {
+			task := convertSWEBenchRow(row)
+			if task == nil {
+				continue
+			}
+
+			data, err := json.MarshalIndent(task, "", "  ")
+			if err != nil {
+				continue
+			}
+
+			filename := filepath.Join(outputDir, task.ID+".json")
+			if err := os.WriteFile(filename, data, 0o644); err != nil {
+				return written, fmt.Errorf("write %s: %w", filename, err)
+			}
+			written++
+		}
+
+		offset += len(rows)
+
+		if len(rows) < length {
+			break
+		}
+	}
+
+	return written, nil
+}
+
+func fetchHFPage(offset, length int) ([]sweBenchRow, error) {
 	url := fmt.Sprintf(
-		"https://datasets-server.huggingface.co/rows?dataset=princeton-nlp%%2FSWE-bench_Lite&config=default&split=test&offset=0&length=%d",
-		count,
+		"https://datasets-server.huggingface.co/rows?dataset=princeton-nlp%%2FSWE-bench_Lite&config=default&split=test&offset=%d&length=%d",
+		offset, length,
 	)
 
 	resp, err := http.Get(url)
 	if err != nil {
-		return 0, fmt.Errorf("fetch dataset: %w", err)
+		return nil, fmt.Errorf("fetch dataset page (offset=%d): %w", offset, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("HuggingFace API returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("HuggingFace API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var hfResp hfResponse
 	if err := json.NewDecoder(resp.Body).Decode(&hfResp); err != nil {
-		return 0, fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	written := 0
-	for _, row := range hfResp.Rows {
-		task := convertSWEBenchRow(row.Row)
-		if task == nil {
-			continue
-		}
-
-		data, err := json.MarshalIndent(task, "", "  ")
-		if err != nil {
-			continue
-		}
-
-		filename := filepath.Join(outputDir, task.ID+".json")
-		if err := os.WriteFile(filename, data, 0o644); err != nil {
-			return written, fmt.Errorf("write %s: %w", filename, err)
-		}
-		written++
+	rows := make([]sweBenchRow, len(hfResp.Rows))
+	for i, r := range hfResp.Rows {
+		rows[i] = r.Row
 	}
-
-	return written, nil
+	return rows, nil
 }
 
 func convertSWEBenchRow(row sweBenchRow) *Task {
@@ -176,11 +211,19 @@ func detectLanguage(repo string) string {
 func detectTestCmd(repo string) string {
 	repo = strings.ToLower(repo)
 	switch {
-	case strings.Contains(repo, "django"):
-		return "python -m django test --settings=tests.test_sqlite --parallel 1"
-	case strings.Contains(repo, "pytest"):
-		return "python -m pytest"
+	case strings.Contains(repo, "django/django"):
+		return "python tests/runtests.py --verbosity 2 --settings test_sqlite --parallel 1"
+	case strings.Contains(repo, "sympy/sympy"):
+		return "bin/test -C --verbose"
+	case strings.Contains(repo, "sphinx-doc/sphinx"):
+		return "python -m pytest --no-header -rN"
+	case strings.Contains(repo, "pallets/flask"):
+		return "python -m pytest --no-header -rN"
+	case strings.Contains(repo, "psf/requests"):
+		return "python -m pytest --no-header -rN"
+	case strings.Contains(repo, "pylint-dev/pylint"):
+		return "python -m pytest --no-header -rN"
 	default:
-		return "python -m pytest"
+		return "python -m pytest --no-header -rN"
 	}
 }

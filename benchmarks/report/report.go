@@ -76,6 +76,9 @@ func (r *Report) GenerateMarkdown(w io.Writer) {
 	// Summary table.
 	r.writeSummaryTable(w, scenarios, taskIDs)
 
+	// Per-category breakdown.
+	r.writeCategoryBreakdown(w, scenarios)
+
 	// Statistical tests.
 	r.writeStatisticalTests(w, taskIDs)
 
@@ -169,6 +172,64 @@ func (r *Report) writeSummaryTable(w io.Writer, scenarios []tasks.Scenario, task
 		}
 		return fmt.Sprintf("%.1f", float64(a.totalTools)/float64(a.totalCount))
 	})
+	fmt.Fprintf(w, "\n")
+}
+
+func (r *Report) writeCategoryBreakdown(w io.Writer, scenarios []tasks.Scenario) {
+	// Collect categories.
+	categories := make(map[string]bool)
+	for _, scenarioMap := range r.results {
+		for _, res := range scenarioMap {
+			if res.Category != "" {
+				categories[res.Category] = true
+			}
+		}
+	}
+
+	if len(categories) <= 1 {
+		return
+	}
+
+	sortedCats := make([]string, 0, len(categories))
+	for c := range categories {
+		sortedCats = append(sortedCats, c)
+	}
+	sort.Strings(sortedCats)
+
+	fmt.Fprintf(w, "## By Category\n\n")
+	fmt.Fprintf(w, "| Category | Scenario | Success Rate | Avg Cost | Avg Tokens |\n")
+	fmt.Fprintf(w, "|----------|----------|-------------|----------|------------|\n")
+
+	for _, cat := range sortedCats {
+		for _, s := range scenarios {
+			var success, total int
+			var costSum float64
+			var tokSum int64
+
+			for _, scenarioMap := range r.results {
+				res, ok := scenarioMap[s]
+				if !ok || res.Category != cat {
+					continue
+				}
+				total++
+				if res.Validation.Success {
+					success++
+				}
+				costSum += res.Metrics.CostUSD
+				tokSum += res.Metrics.InputTokens + res.Metrics.OutputTokens
+			}
+
+			if total == 0 {
+				continue
+			}
+
+			fmt.Fprintf(w, "| %s | %s | %d/%d (%.0f%%) | $%.4f | %d |\n",
+				cat, s,
+				success, total, 100*float64(success)/float64(total),
+				costSum/float64(total),
+				tokSum/int64(total))
+		}
+	}
 	fmt.Fprintf(w, "\n")
 }
 
